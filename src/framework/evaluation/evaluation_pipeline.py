@@ -150,7 +150,7 @@ def save_eval_results_to_table(
             "code_snippet_score": _get_score(row_dict, "code_snippet_quality", "code_snippet_quality/value", "code_snippet_quality/v1/score"),
             "source_citation_score": _get_score(row_dict, "source_citation", "source_citation/value", "source_citation/v1/score"),
             "answer_completeness_score": _get_score(row_dict, "answer_completeness", "answer_completeness/value", "answer_completeness/v1/score"),
-            "overall_passed": eval_result.get("passed", False),
+            "overall_passed": bool(eval_result.get("passed", False)),
             "agent_name": agent_name,
             "agent_version": agent_version,
             "environment": environment,
