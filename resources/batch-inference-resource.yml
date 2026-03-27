@@ -1,0 +1,22 @@
+resources:
+  jobs:
+    batch_inference_job:
+      name: "agentops-batch-inference-${bundle.target}"
+      schedule:
+        quartz_cron_expression: ${var.batch_schedule}
+        timezone_id: America/Chicago
+      tasks:
+        - task_key: run_batch
+          notebook_task:
+            notebook_path: ../src/agent_deployment/batch_inference/notebooks/RunBatchInference.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              agent_name: ${var.agent_name}
+              batch_input_table: ${var.batch_input_table}
+              batch_output_table: ${var.batch_output_table}
+              batch_quarantine_table: ${var.batch_quarantine_table}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl

@@ -1,0 +1,153 @@
+# Agent configuration — all values flow from databricks.yml variables.
+# When running locally/dev, these defaults are used.
+# When running in pipeline, databricks.yml overrides via widget parameters.
+
+agent:
+  name: databricks_docs_agent
+  description: "Databricks Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: mastercard_platform
+    agentops.use_case: databricks_docs
+
+catalog: classic_stable_cykcbe_catalog
+schema: agentops
+
+llm:
+  endpoint: databricks-gpt-oss-120b
+  max_tokens: 2048
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: databricks_docs_index
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+system_prompt: |
+  You are a Databricks Documentation Assistant. You help users understand:
+  - Databricks products and features (Unity Catalog, Delta Lake, MLflow, etc.)
+  - API usage and SDK integration patterns
+  - Coding best practices on the Databricks platform
+  - Configuration, deployment, and troubleshooting
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Include code snippets when relevant
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Keep responses concise and actionable
+
+guardrails:
+  enabled: true
+  # Note: LLM-based safety is handled by AI Gateway safety filter
+  # on the serving endpoint (ai_gateway_safety_enabled: true in databricks.yml).
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+    domain_context_keywords:
+      - databricks
+      - spark
+      - delta
+      - catalog
+      - unity
+      - mlflow
+      - notebook
+      - cluster
+      - warehouse
+      - pipeline
+      - lakehouse
+      - api
+      - sdk
+      - table
+      - schema
+      - volume
+      - model
+      - endpoint
+      - job
+      - workflow
+      - kill
+      - terminate
+    intent_keywords:
+      databricks_query:
+        - databricks
+        - spark
+        - delta
+        - unity catalog
+        - mlflow
+        - notebook
+        - cluster
+        - warehouse
+        - sql
+        - pipeline
+        - lakehouse
+        - api
+        - sdk
+        - pyspark
+        - dbutils
+        - autoloader
+        - medallion
+        - streaming
+        - serving
+        - endpoint
+        - model
+        - vector search
+        - bundle
+        - dab
+        - job
+        - workflow
+        - volume
+        - schema
+        - catalog
+        - table
+        - python
+        - code
+        - function
+        - how to
+        - how do
+        - what is
+        - create
+        - configure
+        - deploy
+        - error
+        - fix
+        - best practice
+      general_greeting:
+        - hello
+        - hi
+        - hey
+        - help
+        - good morning
+        - good afternoon
+        - what can you
+        - who are you
+    allowed_intents:
+      - databricks_query
+      - general_greeting
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+    min_response_length: 20

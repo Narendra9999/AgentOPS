@@ -1,0 +1,52 @@
+[
+  {
+    "request": "What is Unity Catalog?",
+    "expected_response": "Unity Catalog is a unified governance solution for data and AI on the Databricks Lakehouse. It provides centralized access control, auditing, lineage, and data discovery across workspaces.",
+    "context": "core_product"
+  },
+  {
+    "request": "How do I create a Delta table?",
+    "expected_response": "You can create a Delta table using CREATE TABLE sql_name (col type, ...) or by writing a DataFrame: df.write.format('delta').saveAsTable('catalog.schema.table'). Delta is the default format on Databricks.",
+    "context": "coding_pattern"
+  },
+  {
+    "request": "What is the Databricks Python SDK?",
+    "expected_response": "The Databricks SDK for Python (databricks-sdk) provides a client for the Databricks REST API. Install with pip install databricks-sdk. Use WorkspaceClient() to authenticate and call APIs for clusters, jobs, warehouses, etc.",
+    "context": "api_integration"
+  },
+  {
+    "request": "How do I set up MLflow tracing?",
+    "expected_response": "MLflow Tracing provides observability for LLM applications. Use @mlflow.trace decorator or mlflow.trace() context manager. Auto-tracing is available for LangChain, OpenAI, and other frameworks via mlflow.langchain.autolog().",
+    "context": "mlflow"
+  },
+  {
+    "request": "What is a Databricks Asset Bundle?",
+    "expected_response": "Databricks Asset Bundles (DABs) are a CI/CD framework for deploying Databricks resources as code. Define jobs, pipelines, and endpoints in databricks.yml and deploy with 'databricks bundle deploy'.",
+    "context": "deployment"
+  },
+  {
+    "request": "How do I use Auto Loader for streaming ingestion?",
+    "expected_response": "Auto Loader incrementally ingests new files using spark.readStream.format('cloudFiles'). It supports CSV, JSON, Parquet, and Avro. Set cloudFiles.format and cloudFiles.schemaLocation options. It handles schema evolution automatically.",
+    "context": "data_engineering"
+  },
+  {
+    "request": "What is the difference between a SQL warehouse and a cluster?",
+    "expected_response": "SQL warehouses are optimized for SQL analytics with Photon engine and serverless options. Clusters are general-purpose compute for notebooks, Spark jobs, and ML workloads. Use warehouses for BI/SQL, clusters for ETL/ML.",
+    "context": "architecture"
+  },
+  {
+    "request": "How do I create a vector search index?",
+    "expected_response": "Use the Databricks Vector Search SDK or UI. Create an endpoint, then create a delta sync index pointing to a source table with an embedding column. The index auto-syncs when the source table changes.",
+    "context": "ai_feature"
+  },
+  {
+    "request": "How do I configure a model serving endpoint?",
+    "expected_response": "Create a serving endpoint via UI, CLI, or SDK. Specify the registered model name, version, workload size, and scale-to-zero settings. The endpoint provides a REST API for real-time inference.",
+    "context": "deployment"
+  },
+  {
+    "request": "What are best practices for Delta Lake merge operations?",
+    "expected_response": "Use MERGE INTO for upserts. Best practices: match on a unique key, use partition pruning, set spark.databricks.delta.merge.optimizeWrite.enabled, and consider liquid clustering for large tables. Avoid merging into unpartitioned tables with billions of rows.",
+    "context": "best_practice"
+  }
+]

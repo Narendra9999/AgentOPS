@@ -1,0 +1,51 @@
+# NOTE: Only include this in databricks.yml AFTER the agent model
+# is registered in Unity Catalog (Agent.py notebook has been run).
+#
+# Features:
+#   - Champion/Challenger traffic routing (A/B testing)
+#   - AI Gateway: inference tables, rate limiting, usage tracking, safety filter
+
+resources:
+  model_serving_endpoints:
+    agentops_endpoint:
+      name: ${var.chatbot_name}
+      config:
+        served_entities:
+          - entity_name: ${var.catalog}.${var.schema}.${var.agent_name}
+            entity_version: ${var.champion_model_version}
+            workload_size: ${var.champion_workload_size}
+            scale_to_zero_enabled: ${var.serving_scale_to_zero}
+
+        traffic_config:
+          routes:
+            - served_model_name: ${var.agent_name}-${var.champion_model_version}
+              traffic_percentage: ${var.champion_traffic_percentage}
+
+      # AI Gateway
+      ai_gateway:
+        # Safety filter — handles LLM-based content safety (replaces LlamaGuard)
+        guardrails:
+          input:
+            safety: ${var.ai_gateway_safety_enabled}
+            pii:
+              behavior: BLOCK
+          output:
+            safety: ${var.ai_gateway_safety_enabled}
+            pii:
+              behavior: BLOCK
+        # Inference tables
+        inference_table_config:
+          catalog_name: ${var.catalog}
+          schema_name: ${var.schema}
+          enabled: ${var.inference_tables_enabled}
+        # Rate limits
+        rate_limits:
+          - key: user
+            renewal_period: minute
+            calls: ${var.rate_limit_per_user_per_minute}
+          - key: endpoint
+            renewal_period: minute
+            calls: ${var.rate_limit_per_endpoint_per_minute}
+        # Usage tracking
+        usage_tracking_config:
+          enabled: ${var.usage_tracking_enabled}

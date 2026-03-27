@@ -1,0 +1,217 @@
+bundle:
+  name: agentops
+
+include:
+  - resources/*.yml
+
+variables:
+  cluster_id:
+    description: Existing cluster ID for pipeline tasks
+    default: ""
+  catalog:
+    description: Unity Catalog for storing data and models
+    default: classic_stable_cykcbe_catalog
+  schema:
+    description: Schema within the catalog
+    default: agentops
+  audit_schema:
+    description: Schema for audit/pipeline tracking tables
+    default: agentops_audit
+  agent_name:
+    description: Registered model name in UC
+    default: databricks_docs_agent
+  vs_endpoint:
+    description: Vector search endpoint name
+    default: agentops-vs-endpoint
+  llm_endpoint:
+    description: Foundation model serving endpoint
+    default: databricks-gpt-oss-120b
+  embedding_model:
+    description: Embedding model for vector search
+    default: databricks-gte-large-en
+
+  # AI Gateway — safety filter (handles LLM-based content safety at the endpoint level)
+  ai_gateway_safety_enabled:
+    description: "Enable AI Gateway safety filter on serving endpoint (true/false)"
+    default: "true"
+
+  # Framework wheel — stored in UC Volume for serving container access
+  wheel_volume:
+    description: "UC Volume path for framework wheel (catalog.schema.volume_name)"
+    default: wheels
+
+  # Data preparation parameters
+  data_source_url:
+    description: URL to the sitemap XML for document ingestion
+    default: https://docs.databricks.com/en/doc-sitemap.xml
+  max_documents:
+    description: Max documents to fetch (0 = all)
+    default: "0"
+  raw_data_table:
+    description: Table name for raw ingested documents
+    default: databricks_docs_raw
+  preprocessed_data_table:
+    description: Table name for chunked/preprocessed documents
+    default: databricks_docs_chunked
+  chunk_size:
+    description: Max characters per chunk
+    default: "1000"
+  chunk_overlap:
+    description: Overlap characters between chunks
+    default: "200"
+  min_chunk_size:
+    description: Minimum chunk size — discard chunks shorter than this
+    default: "50"
+  chunking_strategy:
+    description: "Chunking strategy: fixed, sentence, semantic"
+    default: sentence
+  vs_index:
+    description: Vector search index name
+    default: databricks_docs_index
+  vs_search_type:
+    description: "Search type: similarity, hybrid, mmr"
+    default: similarity
+  vs_num_results:
+    description: Number of results to return from vector search
+    default: "5"
+  vs_reranker_enabled:
+    description: "Enable reranking of search results (true/false)"
+    default: "false"
+  vs_reranker_model:
+    description: Reranker model endpoint for cross-encoder rescoring
+    default: databricks-bge-large-en
+
+  # Evaluation parameters
+  eval_golden_table:
+    description: UC table name for golden evaluation dataset
+    default: eval_golden_dataset
+  eval_adversarial_table:
+    description: UC table name for adversarial evaluation dataset
+    default: eval_adversarial_dataset
+  eval_results_table:
+    description: UC table name for per-row evaluation results
+    default: eval_results
+
+  # Model deployment parameters
+  chatbot_name:
+    description: Display name for the chatbot / serving endpoint
+    default: agentops-docs-chatbot
+  serving_scale_to_zero:
+    description: "Scale endpoint to zero when idle (true/false)"
+    default: "true"
+
+  # Champion model (primary — receives most traffic)
+  champion_model_version:
+    description: "Champion model version (production-proven). Use 'latest' to auto-resolve."
+    default: "latest"
+  champion_workload_size:
+    description: "Compute size for champion: Small, Medium, Large"
+    default: Small
+  champion_traffic_percentage:
+    description: "% of traffic to champion (0-100)"
+    default: "100"
+
+  # Challenger model (optional — A/B testing new version)
+  challenger_enabled:
+    description: "Enable challenger model for A/B testing (true/false)"
+    default: "false"
+  challenger_model_version:
+    description: "Challenger model version to test"
+    default: ""
+  challenger_workload_size:
+    description: "Compute size for challenger: Small, Medium, Large"
+    default: Small
+  challenger_traffic_percentage:
+    description: "% of traffic to challenger (0-100)"
+    default: "0"
+
+  # Inference tables + rate limiting + usage tracking
+  inference_tables_enabled:
+    description: "Auto-capture request/response logs to UC table (true/false)"
+    default: "true"
+  rate_limit_per_user_per_minute:
+    description: "Max requests per user per minute"
+    default: "10"
+  rate_limit_per_endpoint_per_minute:
+    description: "Max total requests per endpoint per minute"
+    default: "100"
+  usage_tracking_enabled:
+    description: "Track token usage per request (true/false)"
+    default: "true"
+
+  # Lakehouse monitoring
+  lakehouse_monitoring_enabled:
+    description: "Enable Lakehouse Monitoring on inference table (true/false)"
+    default: "true"
+  monitoring_granularity:
+    description: "Monitoring time window: 1 hour, 1 day, etc."
+    default: "1 day"
+
+  # Batch inference
+  inference_mode:
+    description: "Inference mode: online, batch, both"
+    default: both
+  batch_input_table:
+    description: "Table with batch input queries"
+    default: batch_input
+  batch_output_table:
+    description: "Table for batch inference results"
+    default: batch_output
+  batch_quarantine_table:
+    description: "Table for guardrail-blocked batch records"
+    default: batch_quarantine
+  batch_schedule:
+    description: "Cron schedule for batch inference (quartz format)"
+    default: "0 0 6 * * ?"
+
+workspace:
+  root_path: ~/.bundle/${bundle.name}/${bundle.target}
+
+artifacts:
+  agentops_framework:
+    type: whl
+    path: .
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fevm-classic-stable-cykcbe.cloud.databricks.com
+    variables:
+      catalog: classic_stable_cykcbe_catalog
+      schema: agentops
+      cluster_id: "0320-195141-v7nlku6o"
+
+  e2-demo:
+    mode: development
+    workspace:
+      host: https://e2-demo-field-eng.cloud.databricks.com
+      profile: e2-demo-field-eng
+    variables:
+      catalog: nmerla_agentops
+      schema: agentops
+      audit_schema: agentops_audit
+
+  mastercard:
+    mode: development
+    workspace:
+      host: <WORKSPACE_URL>              # TODO: set your workspace URL
+    variables:
+      catalog: mc_edacde
+      schema: agentops
+      audit_schema: agentops_audit
+      cluster_id: "<CLUSTER_ID>"         # TODO: set your cluster ID
+      data_source_url: "local"           # uses bundled dataset (no internet needed)
+      llm_endpoint: "<LLM_ENDPOINT>"     # TODO: e.g. databricks-gpt-oss-120b
+      embedding_model: "<EMBED_MODEL>"   # TODO: e.g. databricks-gte-large-en
+
+  stage:
+    mode: production
+    workspace:
+      host: ${STAGE_WORKSPACE_HOST}
+    variables:
+      catalog: ${STAGE_CATALOG}
+      schema: agentops
+    run_as:
+      service_principal_name: agentops-stage-sp

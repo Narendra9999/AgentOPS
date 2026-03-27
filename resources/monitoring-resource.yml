@@ -1,0 +1,37 @@
+resources:
+  jobs:
+    monitoring_job:
+      name: "agentops-monitoring-${bundle.target}"
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"
+        timezone_id: America/Chicago
+      tasks:
+        - task_key: run_monitoring
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/RunMonitoring.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+    audit_aggregation_job:
+      name: "agentops-audit-aggregation-${bundle.target}"
+      schedule:
+        quartz_cron_expression: "0 0 0 * * ?"
+        timezone_id: America/Chicago
+      tasks:
+        - task_key: aggregate_audit
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/AggregateAudit.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              agent_name: ${var.agent_name}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
