@@ -145,10 +145,18 @@ _nb_dir = os.path.dirname(_nb_path)
 _project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))
 sys.path.insert(0, _project_root)
 
-# All metrics: LLM-as-judge + rule-based
-from agent_development.agent_evaluation.evaluation.custom_scorers import (
-    accuracy, helpfulness, professionalism,
-    docs_relevance, code_snippet_quality, source_citation, answer_completeness)
+# Load scorers based on config.yaml evaluation settings
+import yaml
+_agent_dir = os.path.join(_project_root, "agent_development", "agent")
+with open(os.path.join(_agent_dir, "config.yaml")) as f:
+    _agent_config = yaml.safe_load(f)
+
+from agent_development.agent_evaluation.evaluation.scorer_loader import load_scorers, get_thresholds
+eval_config = _agent_config.get("evaluation", {})
+_all_scorers = load_scorers(eval_config)
+eval_thresholds = get_thresholds(eval_config)
+scorer_mode = eval_config.get("scorer_mode", "builtin")
+print(f"Scorer mode: {scorer_mode} → {len(_all_scorers)} scorers loaded")
 
 golden_pd = spark.table(f"{catalog}.{schema}.{eval_golden_table}").toPandas()
 
@@ -178,11 +186,11 @@ if not _endpoint_name:
             break
 print(f"Evaluating endpoint: {_endpoint_name}")
 
-# Single evaluation call: LLM-as-judge scorers via mlflow.genai.evaluate()
+# Run evaluation with config-driven scorers
 eval_result = run_evaluation(
     eval_dataset=golden_pd,
-    scorers=[accuracy, helpfulness, professionalism,
-             docs_relevance, code_snippet_quality, source_citation, answer_completeness],
+    scorers=_all_scorers,
+    thresholds=eval_thresholds,
     model_endpoint=_endpoint_name,
 )
 

@@ -203,19 +203,16 @@ eval_df["inputs"] = [{"query": r} for r in eval_df["request"]]
 eval_df["expectations"] = [{"expected_response": r} for r in eval_df["expected_response"]]
 # Keep full eval_df — only pass subset columns to mlflow.genai.evaluate()
 
-# Import all metrics (LLM-as-judge + rule-based)
+# Load scorers based on config.yaml evaluation settings
+# Supports: "builtin" (default), "llm_judge", "domain", or "all"
 sys.path.insert(0, _project_root)
-from agent_development.agent_evaluation.evaluation.custom_scorers import (
-    accuracy, helpfulness, professionalism,
-    docs_relevance, code_snippet_quality, source_citation, answer_completeness)
+from agent_development.agent_evaluation.evaluation.scorer_loader import load_scorers, get_thresholds
 
-# Run evaluation using mlflow.genai.evaluate() via framework
-from framework.evaluation.evaluation_pipeline import run_evaluation
-
-# For pre-deployment, we call the model locally via loaded_model.predict()
-# The predict_fn is built into query_iteration — pass data directly
-all_scorers = [accuracy, helpfulness, professionalism,
-               docs_relevance, code_snippet_quality, source_citation, answer_completeness]
+eval_config = agent_config.get("evaluation", {})
+all_scorers = load_scorers(eval_config)
+eval_thresholds = get_thresholds(eval_config)
+scorer_mode = eval_config.get("scorer_mode", "builtin")
+print(f"Scorer mode: {scorer_mode} → {len(all_scorers)} scorers loaded")
 
 # Generate predictions first, then evaluate
 outputs = query_iteration(eval_df)

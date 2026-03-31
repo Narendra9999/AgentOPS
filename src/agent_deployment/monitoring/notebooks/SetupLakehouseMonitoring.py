@@ -138,7 +138,7 @@ _body = {
     "output_schema_name": f"{catalog}.{schema}",
     "assets_dir": _assets_dir,
     "inference_log": {
-        "problem_type": "text",
+        "problem_type": "PROBLEM_TYPE_TEXT",
         "prediction_col": "assistant_response",
         "timestamp_col": "request_time",
         "model_id_col": "model_id",

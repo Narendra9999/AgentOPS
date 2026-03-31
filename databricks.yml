@@ -145,7 +145,7 @@ variables:
     default: "true"
   monitoring_granularity:
     description: "Monitoring time window: 1 hour, 1 day, etc."
-    default: "1 day"
+    default: "1 hour"
 
   # Batch inference
   inference_mode:
