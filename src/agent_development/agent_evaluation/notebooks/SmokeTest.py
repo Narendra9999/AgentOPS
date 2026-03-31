@@ -13,6 +13,7 @@ dbutils.widgets.text("audit_schema", "agentops_audit")
 dbutils.widgets.text("environment", "dev")
 dbutils.widgets.text("vs_endpoint", "agentops-vs-endpoint")
 dbutils.widgets.text("vs_index", "databricks_docs_index")
+dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
@@ -22,6 +23,7 @@ environment = dbutils.widgets.get("environment")
 vs_endpoint = dbutils.widgets.get("vs_endpoint")
 vs_index_name = dbutils.widgets.get("vs_index")
 vs_index_full = f"{catalog}.{schema}.{vs_index_name}"
+chatbot_name = dbutils.widgets.get("chatbot_name")
 
 # COMMAND ----------
 
@@ -50,23 +52,29 @@ from databricks.sdk import WorkspaceClient
 
 w = WorkspaceClient()
 
-# agents.deploy() creates endpoint named: agents_{catalog}-{schema}-{agent_name}
-# The name is truncated to ~63 chars. Search all endpoints for a match.
-agents_prefix = f"agents_{catalog}-{schema}-{agent_name}"
-
+# Use chatbot_name as the endpoint name (set by DeployAgent via agents.deploy(endpoint_name=...))
+# Fall back to searching by prefix for backwards compatibility with old auto-generated names
 endpoint_name = None
-# First try exact match
 try:
-    ep = w.serving_endpoints.get(agents_prefix)
+    ep = w.serving_endpoints.get(chatbot_name)
     if ep.state and str(ep.state.ready).endswith("READY"):
-        endpoint_name = agents_prefix
+        endpoint_name = chatbot_name
+        print(f"Using endpoint: {endpoint_name}")
 except Exception:
-    pass
+    print(f"Endpoint '{chatbot_name}' not found, searching by prefix...")
 
-# Search all endpoints — match by prefix (handles truncation)
+if not endpoint_name:
+    agents_prefix = f"agents_{catalog}-{schema}-{agent_name}"
+    match_prefix = f"agents_{catalog}-{schema}"
+    try:
+        ep = w.serving_endpoints.get(agents_prefix)
+        if ep.state and str(ep.state.ready).endswith("READY"):
+            endpoint_name = agents_prefix
+    except Exception:
+        pass
+
 if not endpoint_name:
     all_endpoints = list(w.serving_endpoints.list())
-    # Match any endpoint whose name starts with "agents_{catalog}-{schema}"
     match_prefix = f"agents_{catalog}-{schema}"
     for ep in all_endpoints:
         if ep.name.startswith(match_prefix) and ep.state and str(ep.state.ready).endswith("READY"):
@@ -76,7 +84,7 @@ if not endpoint_name:
 
 if not endpoint_name:
     raise RuntimeError(
-        f"No READY endpoint found matching '{match_prefix}...'. "
+        f"No READY endpoint found for '{chatbot_name}' or prefix match. "
         "Ensure deploy_agent completed successfully."
     )
 

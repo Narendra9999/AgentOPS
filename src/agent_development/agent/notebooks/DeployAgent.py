@@ -19,6 +19,13 @@ dbutils.widgets.text("challenger_model_version", "")
 dbutils.widgets.text("challenger_workload_size", "Small")
 dbutils.widgets.text("challenger_traffic_percentage", "0")
 dbutils.widgets.text("serving_scale_to_zero", "true")
+dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
+# AI Gateway settings
+dbutils.widgets.text("ai_gateway_safety_enabled", "true")
+dbutils.widgets.text("inference_tables_enabled", "true")
+dbutils.widgets.text("rate_limit_per_user_per_minute", "10")
+dbutils.widgets.text("rate_limit_per_endpoint_per_minute", "100")
+dbutils.widgets.text("usage_tracking_enabled", "true")
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
@@ -31,6 +38,12 @@ challenger_version = dbutils.widgets.get("challenger_model_version")
 challenger_workload = dbutils.widgets.get("challenger_workload_size")
 challenger_traffic = int(dbutils.widgets.get("challenger_traffic_percentage"))
 scale_to_zero = dbutils.widgets.get("serving_scale_to_zero").lower() == "true"
+chatbot_name = dbutils.widgets.get("chatbot_name")
+ai_gateway_safety = dbutils.widgets.get("ai_gateway_safety_enabled").lower() == "true"
+inference_tables = dbutils.widgets.get("inference_tables_enabled").lower() == "true"
+rate_limit_user = int(dbutils.widgets.get("rate_limit_per_user_per_minute"))
+rate_limit_endpoint = int(dbutils.widgets.get("rate_limit_per_endpoint_per_minute"))
+usage_tracking = dbutils.widgets.get("usage_tracking_enabled").lower() == "true"
 
 model_name = f"{catalog}.{schema}.{agent_name}"
 
@@ -59,6 +72,12 @@ challenger_version = dbutils.widgets.get("challenger_model_version")
 challenger_workload = dbutils.widgets.get("challenger_workload_size")
 challenger_traffic = int(dbutils.widgets.get("challenger_traffic_percentage"))
 scale_to_zero = dbutils.widgets.get("serving_scale_to_zero").lower() == "true"
+chatbot_name = dbutils.widgets.get("chatbot_name")
+ai_gateway_safety = dbutils.widgets.get("ai_gateway_safety_enabled").lower() == "true"
+inference_tables = dbutils.widgets.get("inference_tables_enabled").lower() == "true"
+rate_limit_user = int(dbutils.widgets.get("rate_limit_per_user_per_minute"))
+rate_limit_endpoint = int(dbutils.widgets.get("rate_limit_per_endpoint_per_minute"))
+usage_tracking = dbutils.widgets.get("usage_tracking_enabled").lower() == "true"
 model_name = f"{catalog}.{schema}.{agent_name}"
 
 # Start audit tracking
@@ -121,10 +140,12 @@ print(f"  Scale to zero: {scale_to_zero}")
 deployment = agents.deploy(
     model_name,
     champion_version_resolved,
+    endpoint_name=chatbot_name,
     tags={"environment": "dev", "framework": "agentops"},
 )
 endpoint_name = deployment.endpoint_name
 print(f"Champion deployed: {endpoint_name} (v{champion_version_resolved})")
+print(f"  Inference table: {catalog}.{schema}.`{endpoint_name}_payload`")
 
 # COMMAND ----------
 
@@ -194,7 +215,68 @@ if not endpoint_ready:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Smoke test
+# MAGIC ## 5. Configure AI Gateway
+# MAGIC Sets inference tables, rate limits, safety filter, and usage tracking.
+
+# COMMAND ----------
+
+if endpoint_ready:
+    import requests as _req
+
+    _token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+    _host = spark.conf.get("spark.databricks.workspaceUrl", "")
+    if not _host.startswith("http"):
+        _host = f"https://{_host}"
+
+    # Apply AI Gateway config incrementally — some features may not be supported
+    # on all workspace/endpoint types (e.g., agent endpoints don't support
+    # rate limits, usage tracking, or safety guardrails on FEVM workspaces).
+
+    # Step 1: Inference tables (most widely supported)
+    if inference_tables:
+        _gw = {"inference_table_config": {
+            "catalog_name": catalog, "schema_name": schema, "enabled": True,
+        }}
+        _r = _req.put(f"{_host}/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway",
+            headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}, json=_gw)
+        if _r.ok:
+            print(f"  Inference tables: enabled → {catalog}.{schema}.`{endpoint_name}_payload`")
+        else:
+            print(f"  Inference tables: FAILED ({_r.status_code}) — {_r.json().get('message', '')[:100]}")
+
+    # Step 2: Try adding rate limits + usage tracking + safety (may fail on some endpoint types)
+    _gw_full = {}
+    if inference_tables:
+        _gw_full["inference_table_config"] = {
+            "catalog_name": catalog, "schema_name": schema, "enabled": True,
+        }
+    _gw_full["rate_limits"] = [
+        {"key": "user", "renewal_period": "minute", "calls": rate_limit_user},
+        {"key": "endpoint", "renewal_period": "minute", "calls": rate_limit_endpoint},
+    ]
+    _gw_full["usage_tracking_config"] = {"enabled": usage_tracking}
+    if ai_gateway_safety:
+        _gw_full["guardrails"] = {
+            "input": {"safety": True, "pii": {"behavior": "BLOCK"}},
+            "output": {"safety": True, "pii": {"behavior": "BLOCK"}},
+        }
+
+    _r = _req.put(f"{_host}/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway",
+        headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}, json=_gw_full)
+    if _r.ok:
+        print(f"=== AI Gateway fully configured ===")
+        print(f"  Rate limits: {rate_limit_user}/user/min, {rate_limit_endpoint}/endpoint/min")
+        print(f"  Safety filter: {ai_gateway_safety}")
+        print(f"  Usage tracking: {usage_tracking}")
+    else:
+        _msg = _r.json().get("message", "")[:100]
+        print(f"  Advanced AI Gateway features not supported on this endpoint type: {_msg}")
+        print(f"  Inference tables are still enabled (applied in step 1)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 6. Smoke test
 
 # COMMAND ----------
 
@@ -220,7 +302,7 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Complete audit tracking
+# MAGIC ## 7. Complete audit tracking
 
 # COMMAND ----------
 
@@ -230,6 +312,10 @@ pipeline.end_step(_step, status="COMPLETED", output_summary={
     "champion_traffic": champion_traffic,
     "challenger_enabled": bool(challenger_enabled),
     "endpoint_ready": bool(endpoint_ready),
+    "inference_table": f"{catalog}.{schema}.`{endpoint_name}_payload`",
+    "ai_gateway_safety": ai_gateway_safety,
+    "rate_limit_user": rate_limit_user,
+    "rate_limit_endpoint": rate_limit_endpoint,
 })
 pipeline.end(status="COMPLETED")
 

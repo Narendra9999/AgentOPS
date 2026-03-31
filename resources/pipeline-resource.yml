@@ -121,6 +121,12 @@ resources:
               challenger_workload_size: ${var.challenger_workload_size}
               challenger_traffic_percentage: ${var.challenger_traffic_percentage}
               serving_scale_to_zero: ${var.serving_scale_to_zero}
+              chatbot_name: ${var.chatbot_name}
+              ai_gateway_safety_enabled: ${var.ai_gateway_safety_enabled}
+              inference_tables_enabled: ${var.inference_tables_enabled}
+              rate_limit_per_user_per_minute: ${var.rate_limit_per_user_per_minute}
+              rate_limit_per_endpoint_per_minute: ${var.rate_limit_per_endpoint_per_minute}
+              usage_tracking_enabled: ${var.usage_tracking_enabled}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -139,6 +145,7 @@ resources:
               environment: ${bundle.target}
               vs_endpoint: ${var.vs_endpoint}
               vs_index: ${var.vs_index}
+              chatbot_name: ${var.chatbot_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -158,6 +165,7 @@ resources:
               eval_golden_table: ${var.eval_golden_table}
               eval_adversarial_table: ${var.eval_adversarial_table}
               eval_results_table: ${var.eval_results_table}
+              chatbot_name: ${var.chatbot_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl

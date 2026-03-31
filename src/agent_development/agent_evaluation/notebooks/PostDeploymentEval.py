@@ -14,6 +14,7 @@ dbutils.widgets.text("environment", "dev")
 dbutils.widgets.text("eval_golden_table", "eval_golden_dataset")
 dbutils.widgets.text("eval_adversarial_table", "eval_adversarial_dataset")
 dbutils.widgets.text("eval_results_table", "eval_results")
+dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
 
 agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
@@ -23,6 +24,7 @@ environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
+chatbot_name = dbutils.widgets.get("chatbot_name")
 
 # COMMAND ----------
 
@@ -51,6 +53,7 @@ environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
+chatbot_name = dbutils.widgets.get("chatbot_name")
 
 # COMMAND ----------
 
@@ -156,15 +159,23 @@ if not _ws_url.startswith("http"):
     _ws_url = f"https://{_ws_url}"
 os.environ["DATABRICKS_HOST"] = _ws_url
 
-# Find the deployed endpoint
+# Find the deployed endpoint — use chatbot_name first, fall back to prefix search
 from databricks.sdk import WorkspaceClient as _WC
 _w = _WC()
-_match_prefix = f"agents_{catalog}-{schema}"
 _endpoint_name = None
-for _ep in _w.serving_endpoints.list():
-    if _ep.name.startswith(_match_prefix) and _ep.state and str(_ep.state.ready).endswith("READY"):
-        _endpoint_name = _ep.name
-        break
+try:
+    _ep = _w.serving_endpoints.get(chatbot_name)
+    if _ep.state and str(_ep.state.ready).endswith("READY"):
+        _endpoint_name = chatbot_name
+except Exception:
+    pass
+
+if not _endpoint_name:
+    _match_prefix = f"agents_{catalog}-{schema}"
+    for _ep in _w.serving_endpoints.list():
+        if _ep.name.startswith(_match_prefix) and _ep.state and str(_ep.state.ready).endswith("READY"):
+            _endpoint_name = _ep.name
+            break
 print(f"Evaluating endpoint: {_endpoint_name}")
 
 # Single evaluation call: LLM-as-judge scorers via mlflow.genai.evaluate()

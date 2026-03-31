@@ -18,6 +18,21 @@ resources:
           libraries:
             - whl: ../dist/agentops_framework-*.whl
 
+    lakehouse_monitoring_setup:
+      name: "agentops-lakehouse-monitoring-setup-${bundle.target}"
+      tasks:
+        - task_key: setup_lakehouse_monitor
+          notebook_task:
+            notebook_path: ../src/agent_deployment/monitoring/notebooks/SetupLakehouseMonitoring.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              chatbot_name: ${var.chatbot_name}
+              monitoring_granularity: ${var.monitoring_granularity}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
     audit_aggregation_job:
       name: "agentops-audit-aggregation-${bundle.target}"
       schedule:

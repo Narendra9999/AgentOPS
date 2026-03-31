@@ -1,210 +1,173 @@
-Mastercard AgentOPS Framework Scope
+---
+name: AgentOPS Demo Scope
+description: Mastercard AgentOPS framework — scope, status, architecture, and remaining work
+type: skill
+---
 
-Mastercard team is planning to implement a platform wide framework for productionizing agents from lower to production environment on databricks platform.
-We are planning to implement a multi-phase approach to implement the framework before onboarding customers on to the platform.
+# AgentOPS — Mastercard Demo Scope
 
-Scope:
-As part of the phase-1, we are planning to implement the below functionality as part of the framework.
+## Status Summary
 
-Steps involved in the framework:
-a) Data Preparation pipeline
-b) Agent Development include the guardrails including prompt intent and toxicity before submitting to the llm and post response
-c) Agent Evaluation should be guardrails.
-d) Agent Deployment
-e) Inference (should be able to support both Batch and Online for the user configuration)
-f) Monitoring and Drift (Predeployment monitoring with dashboards)
-g) Iterative Development with LLM as judge and prompt optimization ( use this blog as reference : https://www.databricks.com/blog/self-optimizing-football-chatbot-guided-domain-experts-databricks)
+| Area | Status |
+|------|--------|
+| Framework Version | **2.0.1** |
+| 8-Step Pipeline | **All 8 steps passing on FEVM** |
+| Monitoring Jobs | **Built** (hourly monitoring, daily audit) |
+| Batch Inference Job | **Built** (daily cron) |
+| Mastercard Target | **Config ready**, deployment in progress |
+| CI/CD (Jenkinsfile) | **Not started** |
+| Lakehouse Monitoring | **Notebook built**, dashboard setup pending |
+| Documentation | **Updated** (agentops-setup.md, README.md) |
 
-Code for the blog: https://github.com/WesleyPasfield/at-bat-assistant/tree/main
+**Last validated:** 2026-03-30 (FEVM dev target, all 8 pipeline steps green)
 
-Mastercard uses Jenkins for their CI/CD process with bitbucket as their code repo.
-Mastercard have multi-account setup for databricks platform. So, Each Environment -DEV,STAGE and PROD have been on their own accounts and are not workspaces on the same account.
+---
 
-For the initial phase-1 , we will just do DEV to STAGE deployment using DAB (Databricks Asset Bundles)
+## Architecture
 
-Out of scope:
-a) MCP Servers hosting
-b) Model serving using Databricks APP.
-c) Other advanced patterns like multi-agent deployments ,etc.
-d) Session Management using lakebase (designed, deferred)
-e) Tool routing and LangGraph state machine
+```
+databricks.yml (root)
+  └── include: resources/*.yml
+       ├── pipeline-resource.yml       → agentops-pipeline (8 chained tasks)
+       ├── monitoring-resource.yml     → monitoring (hourly) + audit (daily)
+       └── batch-inference-resource.yml → batch inference (daily 6am)
 
-Usecase:
-Read all the documentation of databricks and respond to user queries about the databricks products, integration, coding patterns and best practices and any code snippets/functions or capabilities defined databricks api documentation
-data source : https://docs.databricks.com/en/doc-sitemap.xml
-Reference: https://github.com/ryuta-yoshimatsu/agentops-demo
+pyproject.toml → agentops_framework-2.0.1 wheel (no external deps)
+```
 
+### 8-Step Pipeline
 
-Implementation Status: ALL 8 STEPS PASSING ON FEVM + MASTERCARD DEPLOYMENT IN PROGRESS
-=========================================================================================
+```
+Step 1: data_ingestion         → Scrape/load docs → raw table
+Step 2: data_preprocessing     → Clean HTML, chunk → chunked table
+Step 3: vector_search_setup    → VS endpoint + delta sync index
+Step 4: register_model         → Build wheel, log model, register UC, @champion
+Step 5: pre_deployment_eval    → pyfunc load, LLM-as-judge, quality gate
+Step 6: deploy_agent           → Endpoint (champion/challenger traffic splits)
+Step 7: smoke_test             → 8 endpoint validation tests
+Step 8: post_deployment_eval   → Live endpoint LLM-as-judge scoring
+```
 
-GitHub Repo: https://github.com/narendra-merla_data/agentops-framework
-Framework Version: 1.6.0
+### Cron Jobs (3)
 
+| Job | Schedule | Notebook |
+|-----|----------|----------|
+| `agentops-monitoring` | Hourly | RunMonitoring.py |
+| `agentops-audit-aggregation` | Daily midnight | AggregateAudit.py |
+| `agentops-batch-inference` | Daily 6am | RunBatchInference.py |
 
-8-Step Pipeline Flow:
-─────────────────────
-  Step 1: data_ingestion         → Scrape/load docs → raw table
-  Step 2: data_preprocessing     → Chunk documents → chunked table (chunk_text, url, chunk_id)
-  Step 3: vector_search_setup    → Create VS endpoint + delta sync index (waits for ONLINE)
-  Step 4: register_model         → Build wheel, log model, register in UC, set @champion alias
-  Step 5: pre_deployment_eval    → Load via mlflow.pyfunc.load_model(), LLM-as-judge eval, quality gate
-  Step 6: deploy_agent           → Deploy endpoint (champion/challenger traffic splits)
-  Step 7: smoke_test             → Validate live endpoint (8 tests)
-  Step 8: post_deployment_eval   → Evaluate live endpoint, LLM-as-judge scores
+---
 
-Mastercard Pipeline Status:
-  ✅ Step 1-4: PASSING
-  ✅ Step 5 (pre_deployment_eval): PASSING — LLM-as-judge scores 5/5
-  ✅ Step 6 (deploy_agent): PASSING
-  ✅ Step 7 (smoke_test): PASSING
-  🔄 Step 8 (post_deployment_eval): In progress (pip install + mlflow.genai fix applied)
+## Project Structure (src/ layout)
 
-
-Evaluation Architecture (mlflow.genai.evaluate):
-─────────────────────────────────────────────────
-API: mlflow.genai.evaluate() with @scorer functions
-Judge Model: databricks-meta-llama-3-3-70b-instruct (internal FMAPI, no internet)
-
-7 LLM-as-judge scorers:
-  accuracy (1-5)           — Factual correctness
-  helpfulness (1-5)        — Actionable, practical guidance
-  professionalism (1-5)    — Formal tone
-  docs_relevance (1-5)     — Databricks-specific content
-  code_snippet_quality (1-5) — Code examples for coding questions
-  source_citation (1-5)    — References to documentation
-  answer_completeness (1-5) — Thorough, non-deflecting answers
-
-Scorer implementation: Each @scorer calls _call_judge() which queries the LLM
-endpoint via Databricks SDK. Response parsed with regex to extract 1-5 score.
-
-MLflow version compatibility:
-  - MLflow 3.3.2 (Mastercard): metrics use {name}/mean, scores in assessments[].feedback.value
-  - MLflow 3.10+ (FEVM): metrics use {name}/v1/mean, scores in {name}/value columns
-  - Code handles both formats automatically
-
-Key fix: pass only ["inputs", "outputs", "expectations"] to mlflow.genai.evaluate()
-  - MLflow 3.x auto-maps "request" → "inputs" internally, overwriting dict column
-  - inputs must be list comprehension [{"query": r} for r in series], NOT .apply(lambda)
-  - pandas .apply() wraps dicts in a way that fails isinstance(x, dict) in MLflow 3.3.2
-
-
-Air-Gapped / Mastercard-Specific:
-─────────────────────────────────
-  Pip install:
-    - Conditional: auto-detects Mastercard volume → falls back to PyPI
-    - Volume: /Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/
-    - --no-index flag prevents all PyPI calls
-    - --no-build-isolation for wheel build (uses cluster's setuptools)
-    - All notebooks with pip install also have restartPython() + widget re-read
-
-  Data:
-    - Bundled dataset: 4568 docs in datasets/databricks_docs.json (14 MB)
-    - data_source_url: "local" in Mastercard target reads from bundled JSON
-    - No internet needed for data ingestion
-
-  Evaluation:
-    - mlflow.genai.evaluate() — no default evaluator, no tiktoken/HuggingFace downloads
-    - @scorer functions call internal Databricks FMAPI (no internet)
-    - Zero PyPI calls in production
-
-  Vector Search:
-    - Uses Databricks SDK only (w.vector_search_indexes.query_index)
-    - No databricks-vectorsearch package needed
-    - get_or_create_endpoint waits for ONLINE (600s)
-    - create_delta_sync_index waits for sync complete (1200s)
-    - Column names: chunk_text, url, chunk_id (from chunked table)
-
-  Wheel Build:
-    - Framework wheel embedded in model artifact (conda_env + artifacts pattern)
-    - UC Volume stores wheel for versioning/audit
-    - No external dependencies in pyproject.toml (all pre-installed on ML runtime)
-
-  Utilities:
-    - mlops_utils.py integrated: retry, checkpoint, volume staging, SHA-256 verify
-    - SHARED_LIBS_BASE paths for Mastercard Python libraries
-
-
-Project Structure:
-──────────────────
+```
 AgentOPS/
-├── agentops_demo/
-│   ├── databricks.yml                          # Variables, targets (dev/mastercard/stage)
-│   ├── pyproject.toml                          # Framework wheel (v1.6.0, no deps)
-│   │
-│   ├── framework/                              # Standardized core (→ wheel artifact)
-│   │   ├── agent_base.py                       # AgentOPSBase(ChatAgent)
-│   │   ├── mlops_utils.py                      # Mastercard MLOps utilities
-│   │   ├── guardrails/{pre_llm,post_llm}.py    # 6 pre + 5 post LLM checks
-│   │   ├── evaluation/evaluation_pipeline.py   # run_evaluation() via mlflow.genai.evaluate()
-│   │   ├── audit/audit_logger.py               # PipelineStepLogger + _safe_json_dumps
-│   │   ├── monitoring/trace_monitor.py         # Metrics, guardrail stats, drift
-│   │   ├── optimization/prompt_optimizer.py    # MemAlign + GEPA
-│   │   └── inference/batch_runner.py           # ai_query() with quarantine
-│   │
+├── databricks.yml                    # Bundle config (targets: dev, e2-demo, mastercard, stage)
+├── pyproject.toml                    # Wheel v2.0.1 (no external deps)
+├── src/
+│   ├── framework/                    # Core → wheel artifact
+│   │   ├── agent_base.py            # AgentOPSBase(ChatAgent)
+│   │   ├── mlops_utils.py
+│   │   ├── guardrails/{pre,post}_llm.py
+│   │   ├── evaluation/evaluation_pipeline.py
+│   │   ├── audit/audit_logger.py
+│   │   ├── monitoring/trace_monitor.py
+│   │   ├── optimization/prompt_optimizer.py
+│   │   └── inference/batch_runner.py
 │   ├── data_preparation/
-│   │   ├── data_ingestion/
-│   │   │   ├── datasets/databricks_docs.json   # 4568 docs bundled (14 MB)
-│   │   │   ├── ingestion/fetch_data.py         # fetch_data_from_url + load_data_from_file
-│   │   │   └── notebooks/DataIngestion.py
-│   │   ├── data_preprocessing/
-│   │   │   └── notebooks/DataPreprocessing.py  # → chunk_text, url, chunk_id
-│   │   └── vector_search/
-│   │       ├── vector_search_utils/utils.py    # SDK only, waits for ONLINE
-│   │       └── notebooks/VectorSearch.py
-│   │
+│   │   ├── data_ingestion/           # fetch_data.py + DataIngestion notebook
+│   │   ├── data_preprocessing/       # create_chunk.py + DataPreprocessing notebook
+│   │   └── vector_search/            # utils.py (SDK only) + VectorSearch notebook
 │   ├── agent_development/
-│   │   ├── agent/
-│   │   │   ├── notebooks/Agent.py              # DatabricksDocsAgent (RAG)
-│   │   │   ├── notebooks/RegisterModel.py      # Log + register (no deploy)
-│   │   │   ├── notebooks/DeployAgent.py        # Deploy endpoint (champion/challenger)
-│   │   │   ├── config.yaml                     # Agent config (merged at deploy)
-│   │   │   └── tools/agent_tools.py            # search_docs (SDK)
-│   │   └── agent_evaluation/
-│   │       ├── evaluation/custom_scorers.py    # 7 @scorer LLM-as-judge functions
-│   │       ├── evaluation/{golden,adversarial}_dataset.json
-│   │       └── notebooks/
-│   │           ├── PreDeploymentEval.py         # pyfunc.load_model + genai.evaluate
-│   │           ├── PostDeploymentEval.py        # Live endpoint + genai.evaluate
-│   │           ├── SmokeTest.py                 # 8 endpoint tests
-│   │           ├── RunMonitoring.py             # Hourly + Lakehouse Monitor
-│   │           ├── IterativeImprovement.py      # MemAlign + GEPA
-│   │           └── AggregateAudit.py            # Daily guardrail summary
-│   │
-│   ├── agent_deployment/
-│   │   ├── model_serving/notebooks/UpdateTraffic.py
-│   │   ├── batch_inference/notebooks/RunBatchInference.py
-│   │   └── monitoring/notebooks/SetupLakehouseMonitoring.py
-│   │
-│   └── resources/
-│       ├── pipeline-resource.yml               # 8-step pipeline
-│       ├── monitoring-resource.yml             # Hourly + daily jobs
-│       ├── batch-inference-resource.yml        # Daily batch job
-│       └── serving-resource.yml.reference      # AI Gateway config
+│   │   ├── agent/                    # config.yaml, Agent.py, RegisterModel.py, DeployAgent.py
+│   │   └── agent_evaluation/         # custom_scorers.py, PreDeploymentEval, PostDeploymentEval,
+│   │                                 # SmokeTest, RunMonitoring, AggregateAudit, IterativeImprovement
+│   └── agent_deployment/
+│       ├── model_serving/            # UpdateTraffic.py
+│       ├── batch_inference/          # RunBatchInference.py
+│       └── monitoring/               # SetupLakehouseMonitoring.py
+├── resources/                        # DAB resource YAMLs
+├── fixtures/                         # Bundled data (4568 docs, golden/adversarial datasets)
+├── tests/                            # unit, smoke, integration
+└── docs/                             # Setup guide + examples
+```
 
+---
 
-Config Architecture:
-────────────────────
-  databricks.yml → Infrastructure: workspaces, catalogs, endpoints, cluster_id
-  config.yaml    → Agent behavior: LLM, prompt, guardrails, history turns
-  RegisterModel.py merges both → runtime_config.yaml baked into model artifact
+## Deployment Targets
 
-  Key: databricks.yml is single source of truth for infra settings.
-  config.yaml values are overridden by databricks.yml at deploy time.
+| Target | Workspace | Catalog | Notes |
+|--------|-----------|---------|-------|
+| `dev` | FEVM (classic_stable_cykcbe) | classic_stable_cykcbe_catalog | Default, all 8 steps passing |
+| `e2-demo` | e2-demo-field-eng | nmerla_agentops | Demo workspace |
+| `mastercard` | Customer workspace | mc_edacde | Air-gapped, bundled dataset, TODOs for workspace URL/cluster/endpoints |
+| `stage` | Production staging | env var | Service principal, CI/CD |
 
+---
 
-Cluster Configuration:
-──────────────────────
-  - Mastercard: policy_id mc_edacde_bi_personal_compute, DBR 17.3 ML
-  - FEVM: existing cluster via cluster_id variable
-  - All jobs use existing_cluster_id: ${var.cluster_id}
+## Mastercard-Specific Constraints
 
+- **Air-gapped**: No PyPI, no internet in production
+- **Pip install**: Conditional path — detects Mastercard volume, falls back to `--no-index`
+  - Volume: `/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/`
+  - `--no-build-isolation` for wheel build
+  - `restartPython()` + widget re-read after pip installs
+- **Data**: Bundled `fixtures/databricks_docs.json` (4568 docs, 14 MB), `data_source_url: "local"`
+- **Evaluation**: `@scorer` functions call internal FMAPI, zero PyPI calls
+- **Vector search**: SDK only (`w.vector_search_indexes.query_index`), no `databricks-vectorsearch` package
+- **MLflow compat**: Handles both 3.3.2 (Mastercard) and 3.10+ (FEVM) metric formats automatically
+- **Safety**: AI Gateway safety filter on endpoint (not in-code LlamaGuard)
 
-Remaining:
-──────────
-  ✅ Pre-deployment eval — PASSING on Mastercard (scores 5/5)
-  🔄 Post-deployment eval — pip install fix applied, testing
-  ⏳ 3 scheduled jobs — monitoring, audit aggregation, batch inference
-  ⏳ Lakehouse monitoring setup
-  ⏳ CI/CD Jenkinsfile
-  ⏳ Documentation update
+---
+
+## Evaluation Architecture
+
+7 LLM-as-judge scorers via `mlflow.genai.evaluate()` + `@scorer`:
+
+accuracy (1-5), helpfulness (1-5), professionalism (1-5), docs_relevance (1-5),
+code_snippet_quality (1-5), source_citation (1-5), answer_completeness (1-5)
+
+- Judge model: `databricks-meta-llama-3-3-70b-instruct` (internal FMAPI)
+- Results saved to `eval_results` UC table (queryable)
+- Quality gate: all scores must be 5/5 to pass pre-deployment
+
+---
+
+## Guardrails
+
+Pre-LLM (keyword-based, fast): `input_length → pii → injection → toxicity → intent`
+Post-LLM: `toxicity → compliance → pii_leakage → hallucination → quality`
+Endpoint-level: AI Gateway safety filter (`ai_gateway_safety_enabled: true`)
+
+---
+
+## What's Been Built (completed)
+
+- [x] Full 8-step pipeline (pipeline-resource.yml)
+- [x] Framework wheel with guardrails, evaluation, audit, monitoring, optimization, batch inference
+- [x] Agent (DatabricksDocsAgent) with RAG tool (SDK-based vector search)
+- [x] Pre-deployment eval (pyfunc load, LLM-as-judge, quality gate)
+- [x] Post-deployment eval (live endpoint, LLM-as-judge)
+- [x] Smoke test (8 endpoint validation tests)
+- [x] Model registration with @champion alias
+- [x] Champion/challenger endpoint deployment with traffic splits
+- [x] AI Gateway config (safety filter, rate limits, inference tables, usage tracking)
+- [x] Monitoring job (hourly) — latency, guardrail stats, drift
+- [x] Audit aggregation job (daily)
+- [x] Batch inference job (daily) with quarantine for blocked records
+- [x] Iterative improvement notebook (MemAlign + GEPA)
+- [x] Air-gapped pip install handling
+- [x] Bundled dataset for offline data ingestion
+- [x] MLflow 3.3.2/3.10+ compatibility
+- [x] Unit tests (pre/post guardrails, chunking)
+- [x] SetupLakehouseMonitoring notebook
+- [x] UpdateTraffic notebook
+- [x] Setup documentation (agentops-setup.md)
+
+## Remaining Work
+
+- [ ] **Mastercard deployment**: Fill in TODOs (workspace URL, cluster ID, LLM/embedding endpoints) and run pipeline on Mastercard target
+- [ ] **Lakehouse monitoring dashboard**: Run SetupLakehouseMonitoring notebook to create auto-refreshing dashboard
+- [ ] **CI/CD Jenkinsfile**: Create Jenkinsfile for Mastercard's Jenkins-based CI/CD (validate → test → deploy → run pipeline)
+- [ ] **README update**: Align README.md with current 8-step pipeline (still says 6 steps)
+- [ ] **Unit test import fix**: Tests fail on collection (import errors) — need to fix conftest.py or mock dependencies
