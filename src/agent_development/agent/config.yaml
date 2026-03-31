@@ -22,6 +22,27 @@ llm:
   max_history_turns: 10
   max_retrieval_turns: 3
 
+# Session history persistence — save multi-turn conversations for analytics & replay
+# Both backends can be enabled simultaneously, or either one independently.
+session_history:
+  enabled: true
+
+  # Unity Catalog Delta table — append-only, queryable via SQL/Spark
+  unity_catalog:
+    enabled: true
+    table: session_history           # Stored as {catalog}.{schema}.{table}
+    # Columns auto-created: session_id, turn_number, role, content,
+    #   request_time, response_time_ms, model_endpoint, trace_id
+
+  # PostgreSQL (Lakebase) — low-latency reads for serving-layer session lookup
+  postgres:
+    enabled: false
+    # Connection via Databricks secret scope (no plaintext credentials in config)
+    secret_scope: agentops_secrets
+    secret_key_prefix: pg_session     # Keys: pg_session_host, pg_session_port, pg_session_db, pg_session_user, pg_session_password
+    table: session_history
+    # Schema auto-created on first write if not exists
+
 vector_search:
   endpoint: agentops-vs-endpoint
   index: databricks_docs_index

@@ -14,6 +14,7 @@ import time
 
 from framework.guardrails.pre_llm import PreLLMGuardrails
 from framework.guardrails.post_llm import PostLLMGuardrails
+from framework.session.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class AgentOPSBase(ChatAgent):
         self.guardrails_enabled = gr_config.get("enabled", True)
         self.pre_llm_guardrails = PreLLMGuardrails(gr_config.get("pre_llm", {}))
         self.post_llm_guardrails = PostLLMGuardrails(gr_config.get("post_llm", {}))
+
+        # Session history persistence
+        self.session_store = SessionStore(config)
 
         # Tracing tags — set on every trace automatically
         # Environment is resolved at runtime, not from config.yaml
@@ -163,6 +167,39 @@ class AgentOPSBase(ChatAgent):
             "agentops.latency_ms": str(round(latency_ms, 2)),
             "agentops.status": "success",
         })
+
+        # ── Save session history ──
+        if self.session_store.enabled:
+            response_text = response.messages[-1].content if response.messages else ""
+            # Session ID: from custom_inputs, or derive from trace
+            session_id = ""
+            if custom_inputs and isinstance(custom_inputs, dict):
+                session_id = custom_inputs.get("session_id", "")
+            if not session_id:
+                try:
+                    trace = mlflow.get_current_active_span()
+                    session_id = trace.request_id if trace else ""
+                except Exception:
+                    pass
+            if not session_id:
+                session_id = str(uuid.uuid4())
+
+            trace_id = ""
+            try:
+                trace = mlflow.get_current_active_span()
+                trace_id = trace.request_id if trace else ""
+            except Exception:
+                pass
+
+            model_endpoint = getattr(self, "llm_endpoint", "")
+            self.session_store.save_full_session(
+                session_id=session_id,
+                messages=messages,
+                response_text=response_text,
+                response_time_ms=latency_ms,
+                model_endpoint=model_endpoint,
+                trace_id=trace_id,
+            )
 
         return response
 
