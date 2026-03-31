@@ -165,7 +165,7 @@ variables:
     default: databricks_docs_index
   rag_chatbot_name:
     description: "Serving endpoint name for RAG pipeline"
-    default: databricks-rag-chatbot
+    default: agentops-rag-chatbot
 
   # Batch inference
   inference_mode:
