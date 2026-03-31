@@ -1,0 +1,170 @@
+# Databricks RAG Pipeline
+# Separate pipeline using 'databricks_rag' schema.
+# Same agent code, different namespace for isolated runs.
+#
+# Flow:
+#   data_ingestion → data_preprocessing → vector_search
+#     → register_model
+#     → pre_deployment_eval (loads model via pyfunc, quality gate)
+#     → deploy_agent (only runs if pre-eval passes)
+#     → smoke_test
+#     → post_deployment_eval (tests live endpoint)
+
+resources:
+  jobs:
+    databricks_rag_pipeline:
+      name: "databricks-RAG-pipeline-${bundle.target}"
+      tasks:
+        # ── Step 1: Data Ingestion ──────────────────────────────
+        - task_key: data_ingestion
+          notebook_task:
+            notebook_path: ../src/data_preparation/data_ingestion/notebooks/DataIngestion.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              data_source_url: ${var.data_source_url}
+              max_documents: ${var.max_documents}
+              raw_data_table: ${var.raw_data_table}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 2: Data Preprocessing ──────────────────────────
+        - task_key: data_preprocessing
+          depends_on:
+            - task_key: data_ingestion
+          notebook_task:
+            notebook_path: ../src/data_preparation/data_preprocessing/notebooks/DataPreprocessing.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              raw_data_table: ${var.raw_data_table}
+              preprocessed_data_table: ${var.preprocessed_data_table}
+              chunk_size: ${var.chunk_size}
+              chunk_overlap: ${var.chunk_overlap}
+              min_chunk_size: ${var.min_chunk_size}
+              chunking_strategy: ${var.chunking_strategy}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 3: Vector Search Setup ─────────────────────────
+        - task_key: vector_search_setup
+          depends_on:
+            - task_key: data_preprocessing
+          notebook_task:
+            notebook_path: ../src/data_preparation/vector_search/notebooks/VectorSearch.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              preprocessed_data_table: ${var.preprocessed_data_table}
+              vs_endpoint: ${var.rag_vs_endpoint}
+              vs_index: ${var.rag_vs_index}
+              embedding_model: ${var.embedding_model}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 4: Register Model ──────────────────────────────
+        - task_key: register_model
+          depends_on:
+            - task_key: vector_search_setup
+          notebook_task:
+            notebook_path: ../src/agent_development/agent/notebooks/RegisterModel.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              agent_name: ${var.rag_agent_name}
+              llm_endpoint: ${var.llm_endpoint}
+              vs_endpoint: ${var.rag_vs_endpoint}
+              vs_index: ${var.rag_vs_index}
+              embedding_model: ${var.embedding_model}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 5: Pre-Deployment Eval ─────────────────────────
+        - task_key: pre_deployment_eval
+          depends_on:
+            - task_key: register_model
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/PreDeploymentEval.py
+            base_parameters:
+              agent_name: ${var.rag_agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              audit_schema: ${var.rag_audit_schema}
+              environment: ${bundle.target}
+              eval_golden_table: ${var.eval_golden_table}
+              eval_adversarial_table: ${var.eval_adversarial_table}
+              eval_results_table: ${var.eval_results_table}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 6: Deploy Agent ────────────────────────────────
+        - task_key: deploy_agent
+          depends_on:
+            - task_key: pre_deployment_eval
+          notebook_task:
+            notebook_path: ../src/agent_development/agent/notebooks/DeployAgent.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              agent_name: ${var.rag_agent_name}
+              champion_model_version: ${var.champion_model_version}
+              champion_workload_size: ${var.champion_workload_size}
+              champion_traffic_percentage: ${var.champion_traffic_percentage}
+              challenger_enabled: ${var.challenger_enabled}
+              challenger_model_version: ${var.challenger_model_version}
+              challenger_workload_size: ${var.challenger_workload_size}
+              challenger_traffic_percentage: ${var.challenger_traffic_percentage}
+              serving_scale_to_zero: ${var.serving_scale_to_zero}
+              chatbot_name: ${var.rag_chatbot_name}
+              ai_gateway_safety_enabled: ${var.ai_gateway_safety_enabled}
+              inference_tables_enabled: ${var.inference_tables_enabled}
+              rate_limit_per_user_per_minute: ${var.rate_limit_per_user_per_minute}
+              rate_limit_per_endpoint_per_minute: ${var.rate_limit_per_endpoint_per_minute}
+              usage_tracking_enabled: ${var.usage_tracking_enabled}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 7: Smoke Test ──────────────────────────────────
+        - task_key: smoke_test
+          depends_on:
+            - task_key: deploy_agent
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/SmokeTest.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              agent_name: ${var.rag_agent_name}
+              audit_schema: ${var.rag_audit_schema}
+              environment: ${bundle.target}
+              vs_endpoint: ${var.rag_vs_endpoint}
+              vs_index: ${var.rag_vs_index}
+              chatbot_name: ${var.rag_chatbot_name}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        # ── Step 8: Post-Deployment Evaluation ──────────────────
+        - task_key: post_deployment_eval
+          depends_on:
+            - task_key: smoke_test
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/PostDeploymentEval.py
+            base_parameters:
+              agent_name: ${var.rag_agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.rag_schema}
+              audit_schema: ${var.rag_audit_schema}
+              environment: ${bundle.target}
+              eval_golden_table: ${var.eval_golden_table}
+              eval_adversarial_table: ${var.eval_adversarial_table}
+              eval_results_table: ${var.eval_results_table}
+              chatbot_name: ${var.rag_chatbot_name}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl

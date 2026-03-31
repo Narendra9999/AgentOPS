@@ -147,6 +147,26 @@ variables:
     description: "Monitoring time window: 1 hour, 1 day, etc."
     default: "1 hour"
 
+  # ── RAG Pipeline variables (databricks-RAG-pipeline) ──
+  rag_schema:
+    description: "Schema for the RAG pipeline"
+    default: databricks_rag
+  rag_audit_schema:
+    description: "Audit schema for the RAG pipeline"
+    default: databricks_rag_audit
+  rag_agent_name:
+    description: "Registered model name for RAG pipeline"
+    default: databricks_rag_agent
+  rag_vs_endpoint:
+    description: "Vector search endpoint for RAG pipeline"
+    default: rag-vs-endpoint
+  rag_vs_index:
+    description: "Vector search index for RAG pipeline"
+    default: databricks_docs_index
+  rag_chatbot_name:
+    description: "Serving endpoint name for RAG pipeline"
+    default: databricks-rag-chatbot
+
   # Batch inference
   inference_mode:
     description: "Inference mode: online, batch, both"
