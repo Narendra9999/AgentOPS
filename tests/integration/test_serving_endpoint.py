@@ -7,7 +7,6 @@ Usage:
         --endpoint-name agentops-docs-chatbot
 """
 
-import os
 import pytest
 from databricks.sdk import WorkspaceClient
 
@@ -24,12 +23,6 @@ def endpoint_name(request):
 
 @pytest.fixture(scope="session")
 def client():
-    # In CI/CD (Jenkins), prefer env vars over .databrickscfg to avoid
-    # DuplicateOptionError from misconfigured config files.
-    host = os.environ.get("DATABRICKS_HOST")
-    token = os.environ.get("DATABRICKS_TOKEN")
-    if host and token:
-        return WorkspaceClient(host=host, token=token)
     return WorkspaceClient()
 
 
