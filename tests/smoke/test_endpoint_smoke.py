@@ -7,8 +7,11 @@ Usage:
         --endpoint-name agentops-docs-chatbot
 """
 
+import os
 import pytest
 from databricks.sdk import WorkspaceClient
+
+pytestmark = pytest.mark.smoke
 
 
 def pytest_addoption(parser):
@@ -20,9 +23,25 @@ def endpoint_name(request):
     return request.config.getoption("--endpoint-name")
 
 
+def _create_workspace_client() -> WorkspaceClient:
+    """Create WorkspaceClient safely — handles broken .databrickscfg in CI/CD."""
+    host = os.environ.get("DATABRICKS_HOST")
+    token = os.environ.get("DATABRICKS_TOKEN")
+    if host and token:
+        return WorkspaceClient(host=host, token=token)
+
+    try:
+        return WorkspaceClient()
+    except Exception as e:
+        if "DuplicateOptionError" in type(e).__name__ or "already exists" in str(e):
+            os.environ["DATABRICKS_CONFIG_FILE"] = "/dev/null"
+            return WorkspaceClient()
+        raise
+
+
 @pytest.fixture(scope="session")
 def client():
-    return WorkspaceClient()
+    return _create_workspace_client()
 
 
 def test_endpoint_responds(client, endpoint_name):
