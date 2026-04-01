@@ -19,12 +19,3 @@ dev = ["pytest>=7.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["framework*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "integration: requires live Databricks endpoint (DATABRICKS_HOST + DATABRICKS_TOKEN)",
-    "smoke: quick health check against live endpoint",
-]
-# By default, only run unit tests. Integration/smoke require: pytest -m integration
-addopts = "-m 'not integration and not smoke'"
