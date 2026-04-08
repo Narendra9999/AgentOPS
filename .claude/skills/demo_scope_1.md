@@ -10,16 +10,23 @@ type: skill
 
 | Area | Status |
 |------|--------|
-| Framework Version | **2.0.1** |
-| 8-Step Pipeline | **All 8 steps passing on FEVM** |
+| Framework Version | **2.0.2** |
+| 8-Step Pipeline (agentops) | **All 8 steps passing on FEVM** |
+| 8-Step Pipeline (RAG) | **All 8 steps passing on FEVM** (databricks_rag schema) |
+| Config-Driven Evaluation | **Complete** — builtin/llm_judge/domain/all modes, per-scorer weight/threshold/enabled |
+| Session History | **Complete** — dual-backend (UC Delta + Lakebase DatabricksStore), config-driven |
+| Long-Term Memory | **Complete** — cross-session user facts via Lakebase, agent-driven save/recall tools |
+| Databricks App | **Complete** — FastAPI app with chat UI, Lakebase memory, vector search, MLflow traces |
+| Guardrails | **Complete** — pre/post LLM, PII whitelist (docs + safe domains), intent w/ memory context |
 | Monitoring Jobs | **Built** (hourly monitoring, daily audit) |
 | Batch Inference Job | **Built** (daily cron) |
-| Mastercard Target | **Config ready**, deployment in progress |
-| CI/CD (Jenkinsfile) | **Not started** |
-| Lakehouse Monitoring | **Notebook built**, dashboard setup pending |
+| Mastercard Target | **Config ready**, CI/CD pipeline running |
+| CI/CD (Jenkins) | **CI passing** (unit tests), CD deploying |
+| Lakehouse Monitoring | **Notebook built**, validation pending |
+| Iterative Improvement | **Validated** — GEPA alignment running on FEVM (MLflow 3.10.1) |
 | Documentation | **Updated** (agentops-setup.md, README.md) |
 
-**Last validated:** 2026-03-30 (FEVM dev target, all 8 pipeline steps green)
+**Last validated:** 2026-04-08 (FEVM dev target, both pipelines green, Databricks App live)
 
 ---
 
@@ -32,7 +39,14 @@ databricks.yml (root)
        ├── monitoring-resource.yml     → monitoring (hourly) + audit (daily)
        └── batch-inference-resource.yml → batch inference (daily 6am)
 
-pyproject.toml → agentops_framework-2.0.1 wheel (no external deps)
+pyproject.toml → agentops_framework-2.0.2 wheel (no external deps)
+
+resources/
+  ├── pipeline-resource.yml         → agentops-pipeline (8 chained tasks, agentops schema)
+  ├── rag-pipeline-resource.yml     → databricks-RAG-pipeline (8 tasks, databricks_rag schema)
+  ├── monitoring-resource.yml       → monitoring (hourly) + audit (daily)
+  ├── batch-inference-resource.yml  → batch inference (daily 6am)
+  └── app-resource.yml              → Databricks App (FastAPI + Lakebase memory, opt-in)
 ```
 
 ### 8-Step Pipeline
@@ -66,10 +80,11 @@ AgentOPS/
 ├── pyproject.toml                    # Wheel v2.0.1 (no external deps)
 ├── src/
 │   ├── framework/                    # Core → wheel artifact
-│   │   ├── agent_base.py            # AgentOPSBase(ChatAgent)
+│   │   ├── agent_base.py            # AgentOPSBase(ChatAgent) + session history hook
 │   │   ├── mlops_utils.py
 │   │   ├── guardrails/{pre,post}_llm.py
 │   │   ├── evaluation/evaluation_pipeline.py
+│   │   ├── session/session_store.py  # UC Delta + Lakebase DatabricksStore dual-backend
 │   │   ├── audit/audit_logger.py
 │   │   ├── monitoring/trace_monitor.py
 │   │   ├── optimization/prompt_optimizer.py
@@ -80,9 +95,18 @@ AgentOPS/
 │   │   └── vector_search/            # utils.py (SDK only) + VectorSearch notebook
 │   ├── agent_development/
 │   │   ├── agent/                    # config.yaml, Agent.py, RegisterModel.py, DeployAgent.py
-│   │   └── agent_evaluation/         # custom_scorers.py, PreDeploymentEval, PostDeploymentEval,
-│   │                                 # SmokeTest, RunMonitoring, AggregateAudit, IterativeImprovement
+│   │   └── agent_evaluation/         # custom_scorers.py, scorer_loader.py, PreDeploymentEval,
+│   │                                 # PostDeploymentEval, SmokeTest, RunMonitoring,
+│   │                                 # AggregateAudit, IterativeImprovement
 │   └── agent_deployment/
+│       ├── app/                      # Databricks App (FastAPI + Lakebase + chat UI)
+│       │   ├── server.py            # FastAPI server (/, /health, /invocations)
+│       │   ├── agent_app.py         # Async agent with Lakebase memory + tools
+│       │   ├── chat.html            # Browser chat UI
+│       │   ├── app.yaml             # App config (env vars)
+│       │   ├── requirements.txt     # App dependencies
+│       │   ├── config.yaml          # Agent config (guardrails, system prompt)
+│       │   └── guardrails/          # Pre/post LLM guardrails (app copy)
 │       ├── model_serving/            # UpdateTraffic.py
 │       ├── batch_inference/          # RunBatchInference.py
 │       └── monitoring/               # SetupLakehouseMonitoring.py
@@ -122,14 +146,21 @@ AgentOPS/
 
 ## Evaluation Architecture
 
-7 LLM-as-judge scorers via `mlflow.genai.evaluate()` + `@scorer`:
+Config-driven via `config.yaml` → `evaluation.scorer_mode`:
 
-accuracy (1-5), helpfulness (1-5), professionalism (1-5), docs_relevance (1-5),
-code_snippet_quality (1-5), source_citation (1-5), answer_completeness (1-5)
+| Mode | Scorers | LLM Calls |
+|------|---------|-----------|
+| `builtin` (default) | MLflow built-in: Guidelines, Correctness, RelevanceToQuery, Safety, RetrievalGroundedness | Yes (judge model) |
+| `llm_judge` | 7 custom scorers: accuracy, helpfulness, professionalism, docs_relevance, code_snippet_quality, source_citation, answer_completeness (each with detailed 1-5 rubrics) | Yes (judge model) |
+| `domain` | User-defined scorers: guidelines (LLM pass/fail), rubric (LLM 1-5), keyword (regex, no LLM), expected_facts (fact coverage, no LLM) | Depends on type |
+| `all` | All three combined | Yes |
+
+**Per-scorer customization**: `enabled`, `weight`, `threshold` (overrides global `quality_gate_threshold`)
 
 - Judge model: `databricks-meta-llama-3-3-70b-instruct` (internal FMAPI)
+- Scorer loader: `scorer_loader.py` → `load_scorers()`, `get_thresholds()`, `get_weights()`
 - Results saved to `eval_results` UC table (queryable)
-- Quality gate: all scores must be 5/5 to pass pre-deployment
+- Quality gate: configurable threshold (default 3.5), per-scorer overrides supported
 
 ---
 
@@ -143,31 +174,44 @@ Endpoint-level: AI Gateway safety filter (`ai_gateway_safety_enabled: true`)
 
 ## What's Been Built (completed)
 
-- [x] Full 8-step pipeline (pipeline-resource.yml)
-- [x] Framework wheel with guardrails, evaluation, audit, monitoring, optimization, batch inference
+- [x] Full 8-step pipeline — agentops-pipeline (pipeline-resource.yml)
+- [x] Full 8-step pipeline — databricks-RAG-pipeline (rag-pipeline-resource.yml, databricks_rag schema)
+- [x] Framework wheel with guardrails, evaluation, audit, monitoring, optimization, batch inference, session history
 - [x] Agent (DatabricksDocsAgent) with RAG tool (SDK-based vector search)
-- [x] Pre-deployment eval (pyfunc load, LLM-as-judge, quality gate)
-- [x] Post-deployment eval (live endpoint, LLM-as-judge)
-- [x] Smoke test (8 endpoint validation tests)
+- [x] Config-driven evaluation scorers — builtin/llm_judge/domain/all modes
+- [x] 4 domain scorer types: guidelines, rubric, keyword, expected_facts
+- [x] Per-scorer customization: enabled, weight, threshold override
+- [x] MLflow built-in scorers: Guidelines, Correctness, RelevanceToQuery, Safety, RetrievalGroundedness
+- [x] 7 LLM-as-judge scorers with detailed 1-5 rubrics
+- [x] Session history persistence — dual-backend (UC Delta table + Lakebase DatabricksStore)
+- [x] Long-term agent memory — cross-session user facts via Lakebase DatabricksStore with semantic search
+- [x] Databricks App — FastAPI server with chat UI, Lakebase memory, vector search, MLflow traces
+- [x] Agent-driven memory tools — save_memory/recall_memories via LLM tool-calling loop
+- [x] Cross-thread conversation summary — recap available on new threads via long-term memory
+- [x] PII guardrail hardening — safe domain whitelist + doc-sourced email whitelist
+- [x] Intent guardrail context — uses recalled memories as fallback for new-thread intent check
+- [x] Pre-deployment eval (pyfunc load, config-driven scorers, quality gate)
+- [x] Post-deployment eval (live endpoint, config-driven scorers)
+- [x] Smoke test (8 endpoint validation tests, AI Gateway safety filter resilient)
 - [x] Model registration with @champion alias
 - [x] Champion/challenger endpoint deployment with traffic splits
 - [x] AI Gateway config (safety filter, rate limits, inference tables, usage tracking)
 - [x] Monitoring job (hourly) — latency, guardrail stats, drift
 - [x] Audit aggregation job (daily)
 - [x] Batch inference job (daily) with quarantine for blocked records
-- [x] Iterative improvement notebook (MemAlign + GEPA)
+- [x] Iterative improvement notebook (GEPA alignment + prompt optimization)
 - [x] Air-gapped pip install handling
 - [x] Bundled dataset for offline data ingestion
 - [x] MLflow 3.3.2/3.10+ compatibility
-- [x] Unit tests (pre/post guardrails, chunking)
+- [x] Unit tests (pre/post guardrails, chunking) — CI-only via testpaths config
 - [x] SetupLakehouseMonitoring notebook
 - [x] UpdateTraffic notebook
 - [x] Setup documentation (agentops-setup.md)
+- [x] Jenkins CI passing (unit tests only, integration/smoke excluded by default)
 
-## Remaining Work
+## Remaining Work (Next Steps)
 
+- [ ] **Validate Lakehouse Monitoring job**: Run SetupLakehouseMonitoring + verify auto-refreshing dashboard
+- [x] **Validate Iterative Improvement pipeline**: GEPA alignment validated on FEVM (2026-04-07) — 15 traces, expert labels, make_judge, GEPA alignment all working
 - [ ] **Mastercard deployment**: Fill in TODOs (workspace URL, cluster ID, LLM/embedding endpoints) and run pipeline on Mastercard target
-- [ ] **Lakehouse monitoring dashboard**: Run SetupLakehouseMonitoring notebook to create auto-refreshing dashboard
-- [ ] **CI/CD Jenkinsfile**: Create Jenkinsfile for Mastercard's Jenkins-based CI/CD (validate → test → deploy → run pipeline)
-- [ ] **README update**: Align README.md with current 8-step pipeline (still says 6 steps)
-- [ ] **Unit test import fix**: Tests fail on collection (import errors) — need to fix conftest.py or mock dependencies
+- [ ] **README update**: Align README.md with current architecture

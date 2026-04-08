@@ -137,6 +137,13 @@ class DatabricksDocsAgent(AgentOPSBase):
             {"role": "system", "content": self.system_prompt},
             {"role": "system", "content": f"Documentation Context:\n\n{context_text}"},
         ]
+
+        # Inject long-term user memories (recalled by AgentOPSBase from Lakebase)
+        user_memories = self._request_context.get("user_memories", [])
+        if user_memories:
+            memory_lines = [f"  [{m['key']}]: {m['content']}" for m in user_memories]
+            memory_text = "User context from prior sessions:\n" + "\n".join(memory_lines)
+            augmented_messages.append({"role": "system", "content": memory_text})
         history = messages[-self.max_history_turns:] if len(messages) > self.max_history_turns else messages
         for msg in history:
             augmented_messages.append({"role": msg.role, "content": msg.content})

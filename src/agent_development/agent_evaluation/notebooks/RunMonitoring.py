@@ -140,7 +140,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=audit_schema,
     pipeline_name="monitoring", agent_name=agent_name, environment="dev",
-    triggered_by="schedule", depends_on="none", spark=spark,
+    triggered_by="schedule", depends_on="none", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 

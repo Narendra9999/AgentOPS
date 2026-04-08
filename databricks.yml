@@ -2,7 +2,13 @@ bundle:
   name: agentops
 
 include:
-  - resources/*.yml
+  - resources/pipeline-resource.yml
+  - resources/rag-pipeline-resource.yml
+  - resources/monitoring-resource.yml
+  - resources/batch-inference-resource.yml
+  # Uncomment to deploy as Databricks App with Lakebase memory
+  # (enables session history + long-term user memory via Lakebase Autoscaling)
+  - resources/app-resource.yml
 
 variables:
   cluster_id:

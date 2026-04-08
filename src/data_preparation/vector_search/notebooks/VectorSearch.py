@@ -31,7 +31,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=f"{schema}_audit",
     pipeline_name="vector_search_setup", agent_name="", environment="dev",
-    triggered_by="pipeline", depends_on="data_preprocessing", spark=spark,
+    triggered_by="pipeline", depends_on="data_preprocessing", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 step = pipeline.start_step("create_index", step_order=1, step_type="data_prep", depends_on="data_preprocessing")

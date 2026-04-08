@@ -55,7 +55,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=f"{schema}_audit",
     pipeline_name="register_model", agent_name=agent_name, environment="dev",
-    triggered_by="pipeline", depends_on="vector_search_setup", spark=spark,
+    triggered_by="pipeline", depends_on="vector_search_setup", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 _step = pipeline.start_step("log_and_register", step_order=1, step_type="registration", depends_on="vector_search_setup")
@@ -191,6 +191,7 @@ _conda_env = _mlflow_conda_env(
         "mlflow>=3.1.0",
         "databricks-agents>=1.2.0",
         "databricks-sdk>=0.30.0",
+        "databricks-langchain[memory]",
         "pyyaml>=6.0",
     ],
 )

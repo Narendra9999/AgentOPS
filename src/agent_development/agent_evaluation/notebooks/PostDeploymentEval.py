@@ -62,7 +62,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=audit_schema,
     pipeline_name="post_deployment_eval", agent_name=agent_name, environment=environment,
-    triggered_by="cicd", depends_on="smoke_test", spark=spark,
+    triggered_by="cicd", depends_on="smoke_test", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 
@@ -146,17 +146,23 @@ _project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_
 sys.path.insert(0, _project_root)
 
 # Load scorers based on config.yaml evaluation settings
+# When mode="all", scorer groups run in PARALLEL with MLflow trace spans per group
 import yaml
 _agent_dir = os.path.join(_project_root, "agent_development", "agent")
 with open(os.path.join(_agent_dir, "config.yaml")) as f:
     _agent_config = yaml.safe_load(f)
 
-from agent_development.agent_evaluation.evaluation.scorer_loader import load_scorers, get_thresholds
+from agent_development.agent_evaluation.evaluation.scorer_loader import (
+    load_scorer_groups, get_thresholds,
+)
 eval_config = _agent_config.get("evaluation", {})
-_all_scorers = load_scorers(eval_config)
+scorer_groups = load_scorer_groups(eval_config)
 eval_thresholds = get_thresholds(eval_config)
 scorer_mode = eval_config.get("scorer_mode", "builtin")
-print(f"Scorer mode: {scorer_mode} → {len(_all_scorers)} scorers loaded")
+total_scorers = sum(len(s) for s in scorer_groups.values())
+print(f"Scorer mode: {scorer_mode} → {total_scorers} scorers in {len(scorer_groups)} groups")
+for gname, gscorers in scorer_groups.items():
+    print(f"  {gname}: {len(gscorers)} scorers")
 
 golden_pd = spark.table(f"{catalog}.{schema}.{eval_golden_table}").toPandas()
 
@@ -167,7 +173,7 @@ if not _ws_url.startswith("http"):
     _ws_url = f"https://{_ws_url}"
 os.environ["DATABRICKS_HOST"] = _ws_url
 
-# Find the deployed endpoint — use chatbot_name first, fall back to prefix search
+# Find the deployed endpoint
 from databricks.sdk import WorkspaceClient as _WC
 _w = _WC()
 _endpoint_name = None
@@ -186,10 +192,11 @@ if not _endpoint_name:
             break
 print(f"Evaluating endpoint: {_endpoint_name}")
 
-# Run evaluation with config-driven scorers
+# Run evaluation with parallel scorer groups
+# Each group (builtin, llm_judge, domain) runs concurrently with its own MLflow trace span
 eval_result = run_evaluation(
     eval_dataset=golden_pd,
-    scorers=_all_scorers,
+    scorer_groups=scorer_groups,
     thresholds=eval_thresholds,
     model_endpoint=_endpoint_name,
 )
@@ -197,6 +204,14 @@ eval_result = run_evaluation(
 print(f"\n=== Evaluation Metrics ===")
 for k, v in sorted(eval_result.get("metrics", {}).items()):
     print(f"  {k}: {v}")
+
+# Show parallel execution timing if available
+if eval_result.get("group_results"):
+    print(f"\n=== Parallel Execution ===")
+    for gname, gresult in eval_result["group_results"].items():
+        duration = gresult.get("duration_ms", 0)
+        scorers = gresult.get("scorers", [])
+        print(f"  {gname}: {duration}ms ({len(scorers)} scorers)")
 
 print(f"\n=== Quality Gate ===")
 print(f"Overall: {'PASSED' if eval_result['passed'] else 'FAILED'}")
@@ -254,20 +269,33 @@ display(spark.sql(f"""
 
 # COMMAND ----------
 
-step = pipeline.start_step("guardrail_evaluation", step_order=1, step_type="evaluation", depends_on="smoke_test")
+step = pipeline.start_step("guardrail_evaluation", step_order=1, step_type="post_eval", depends_on="smoke_test")
 pipeline.end_step(step, status="COMPLETED", output_summary={
     "block_accuracy": guardrail_results["block_accuracy"],
     "pass_accuracy": guardrail_results["pass_accuracy"],
     "overall_accuracy": guardrail_results["overall_accuracy"],
+    "false_positives": guardrail_results["false_positives"],
+    "false_negatives": guardrail_results["false_negatives"],
 })
 
-step = pipeline.start_step("quality_evaluation", step_order=2, step_type="evaluation", depends_on="guardrail_evaluation")
-pipeline.end_step(step, status="COMPLETED", output_summary={
-    "passed": eval_result["passed"],
+# Build full quality summary with all metrics
+quality_summary = {
+    "scorer_mode": scorer_mode,
+    "scorer_groups": {k: len(v) for k, v in scorer_groups.items()},
+    "gate_passed": eval_result["passed"],
+    "all_metrics": {k: round(v, 3) if isinstance(v, float) else v for k, v in eval_result.get("metrics", {}).items()},
     "gate_results": eval_result.get("gate_results", {}),
-})
+}
+if eval_result.get("group_results"):
+    quality_summary["parallel_timing_ms"] = {
+        gname: gresult.get("duration_ms", 0)
+        for gname, gresult in eval_result["group_results"].items()
+    }
 
-step = pipeline.start_step("save_eval_results", step_order=3, step_type="evaluation")
+step = pipeline.start_step("quality_evaluation", step_order=2, step_type="post_eval", depends_on="guardrail_evaluation")
+pipeline.end_step(step, status="COMPLETED", records_processed=len(golden_pd), output_summary=quality_summary)
+
+step = pipeline.start_step("save_eval_results", step_order=3, step_type="post_eval")
 pipeline.end_step(step, status="COMPLETED", records_processed=len(golden_pd), output_summary={
     "evaluation_id": evaluation_id,
 })

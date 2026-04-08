@@ -37,7 +37,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=audit_schema,
     pipeline_name="smoke_test", agent_name=agent_name, environment=environment,
-    triggered_by="pipeline", depends_on="deploy_agent", spark=spark,
+    triggered_by="pipeline", depends_on="deploy_agent", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 

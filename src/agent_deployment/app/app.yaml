@@ -1,0 +1,26 @@
+env:
+  # Resolved from databricks.yml resource bindings
+  - name: SERVING_ENDPOINT_NAME
+    valueFrom: serving-endpoint
+  - name: MLFLOW_EXPERIMENT_ID
+    valueFrom: app-experiment
+
+  # Agent config
+  - name: CATALOG_NAME
+    value: classic_stable_cykcbe_catalog
+  - name: SCHEMA_NAME
+    value: agentops
+
+  # Lakebase Autoscaling (session history + long-term memory)
+  - name: LAKEBASE_AUTOSCALING_PROJECT
+    value: agentops-sessions
+  - name: LAKEBASE_AUTOSCALING_BRANCH
+    value: production
+
+  # Vector search
+  - name: VS_INDEX
+    value: classic_stable_cykcbe_catalog.agentops.databricks_docs_index
+  - name: VS_NUM_RESULTS
+    value: "5"
+
+command: ["python", "server.py"]

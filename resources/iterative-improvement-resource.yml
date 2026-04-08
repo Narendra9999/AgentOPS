@@ -1,0 +1,101 @@
+# Iterative Improvement Pipeline — Judge Alignment + Prompt Optimization + Skills
+# Manual-trigger only (no schedule). Run after domain experts label traces in MLflow UI.
+#
+# Prerequisites:
+#   1. At least 10 expert-labeled traces in the MLflow experiment
+#   2. Labels logged via MLflow UI / Review App with assessments
+#
+# Pipeline flow:
+#   05_JudgeAlignment → 06_PromptOptimization → 07_SkillGeneration → 08_AgentWithSkills → 09_HeldOutEvaluation
+#
+# Trigger: databricks bundle run agentops_iterative_improvement -t <target>
+#
+# Reference: https://github.com/WesleyPasfield/at-bat-assistant
+
+resources:
+  jobs:
+    agentops_iterative_improvement:
+      name: "agentops-iterative-improvement-${bundle.target}"
+      tags:
+        agentops.pipeline: iterative_improvement
+        agentops.trigger: manual
+      tasks:
+        - task_key: judge_alignment
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/05_JudgeAlignment.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              judge_name: response_quality
+              judge_model: databricks-meta-llama-3-3-70b-instruct
+              embedding_model: databricks-gte-large-en
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        - task_key: prompt_optimization
+          depends_on:
+            - task_key: judge_alignment
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/06_PromptOptimization.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              judge_model: databricks-meta-llama-3-3-70b-instruct
+              aligned_judge_name: response_quality_aligned
+              n_runs: "3"
+              max_metric_calls: "100"
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        - task_key: skill_generation
+          depends_on:
+            - task_key: prompt_optimization
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/07_SkillGeneration.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              judge_model: databricks-meta-llama-3-3-70b-instruct
+              aligned_judge_name: response_quality_aligned
+              max_metric_calls: "150"
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        - task_key: agent_with_skills
+          depends_on:
+            - task_key: skill_generation
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/08_AgentWithSkills.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl
+
+        - task_key: held_out_evaluation
+          depends_on:
+            - task_key: agent_with_skills
+          notebook_task:
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/09_HeldOutEvaluation.py
+            base_parameters:
+              agent_name: ${var.agent_name}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              audit_schema: ${var.audit_schema}
+              aligned_judge_name: response_quality_aligned
+              chatbot_name: ${var.chatbot_name}
+          existing_cluster_id: ${var.cluster_id}
+          libraries:
+            - whl: ../dist/agentops_framework-*.whl

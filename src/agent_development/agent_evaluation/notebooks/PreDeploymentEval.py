@@ -66,7 +66,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=audit_schema,
     pipeline_name="pre_deployment_eval", agent_name=agent_name, environment=environment,
-    triggered_by="pipeline", depends_on="register_model", spark=spark,
+    triggered_by="pipeline", depends_on="register_model", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 
@@ -205,26 +205,49 @@ eval_df["expectations"] = [{"expected_response": r} for r in eval_df["expected_r
 
 # Load scorers based on config.yaml evaluation settings
 # Supports: "builtin" (default), "llm_judge", "domain", or "all"
+# When mode="all", scorer groups run in PARALLEL with MLflow trace spans per group
 sys.path.insert(0, _project_root)
-from agent_development.agent_evaluation.evaluation.scorer_loader import load_scorers, get_thresholds
+from agent_development.agent_evaluation.evaluation.scorer_loader import (
+    load_scorers, load_scorer_groups, get_thresholds, run_parallel_evaluation,
+)
 
 eval_config = agent_config.get("evaluation", {})
-all_scorers = load_scorers(eval_config)
-eval_thresholds = get_thresholds(eval_config)
 scorer_mode = eval_config.get("scorer_mode", "builtin")
-print(f"Scorer mode: {scorer_mode} → {len(all_scorers)} scorers loaded")
+eval_thresholds = get_thresholds(eval_config)
+
+# Load scorer groups for parallel execution (mode="all" → 3 groups)
+scorer_groups = load_scorer_groups(eval_config)
+total_scorers = sum(len(s) for s in scorer_groups.values())
+print(f"Scorer mode: {scorer_mode} → {total_scorers} scorers in {len(scorer_groups)} groups")
+for group_name, scorers in scorer_groups.items():
+    print(f"  {group_name}: {len(scorers)} scorers")
 
 # Generate predictions first, then evaluate
 outputs = query_iteration(eval_df)
 eval_df["outputs"] = outputs
 
-eval_result = mlflow.genai.evaluate(
-    data=eval_df[["inputs", "outputs", "expectations"]],
-    scorers=all_scorers,
-)
+# Run evaluation — parallel if multiple groups, sequential otherwise
+# Each group gets its own MLflow trace span for observability
+if len(scorer_groups) > 1:
+    print(f"\nRunning {len(scorer_groups)} scorer groups in PARALLEL...")
+    parallel_result = run_parallel_evaluation(
+        eval_data=eval_df[["inputs", "outputs", "expectations"]],
+        scorer_groups=scorer_groups,
+    )
+    eval_metrics = parallel_result["metrics"]
+    print(f"\nParallel evaluation complete: {parallel_result.get('total_duration_ms')}ms")
+    for gname, gresult in parallel_result.get("group_results", {}).items():
+        print(f"  {gname}: {gresult.get('duration_ms')}ms, {len(gresult.get('scorers', []))} scorers")
+else:
+    all_scorers = [s for group in scorer_groups.values() for s in group]
+    eval_result = mlflow.genai.evaluate(
+        data=eval_df[["inputs", "outputs", "expectations"]],
+        scorers=all_scorers,
+    )
+    eval_metrics = eval_result.metrics
 
 print(f"\n=== Pre-Deployment Evaluation Metrics ===")
-for k, v in sorted(eval_result.metrics.items()):
+for k, v in sorted(eval_metrics.items()):
     print(f"  {k}: {v}")
 
 # COMMAND ----------
@@ -241,9 +264,9 @@ PROFESSIONALISM_THRESHOLD = 3.5
 GUARDRAIL_ACCURACY_THRESHOLD = 0.80
 
 # MLflow 3.3.2 uses {name}/mean, MLflow 3.10+ uses {name}/v1/mean
-accuracy_score = eval_result.metrics.get("accuracy/mean", eval_result.metrics.get("accuracy/v1/mean", 0))
-helpfulness_score = eval_result.metrics.get("helpfulness/mean", eval_result.metrics.get("helpfulness/v1/mean", 0))
-professionalism_score = eval_result.metrics.get("professionalism/mean", eval_result.metrics.get("professionalism/v1/mean", 0))
+accuracy_score = eval_metrics.get("accuracy/mean", eval_metrics.get("accuracy/v1/mean", 0))
+helpfulness_score = eval_metrics.get("helpfulness/mean", eval_metrics.get("helpfulness/v1/mean", 0))
+professionalism_score = eval_metrics.get("professionalism/mean", eval_metrics.get("professionalism/v1/mean", 0))
 guardrail_accuracy = guardrail_results["overall_accuracy"]
 
 quality_passed = (
@@ -274,29 +297,22 @@ if not gate_passed:
 
 from framework.evaluation.evaluation_pipeline import save_eval_results_to_table
 
-# Debug: check what we're passing to save
-per_row = eval_result.tables.get("eval_results", eval_result.tables.get("eval_results_table"))
+# Get per-row results (from parallel or sequential run)
+if len(scorer_groups) > 1:
+    per_row = parallel_result.get("tables", {}).get("eval_results")
+else:
+    per_row = eval_result.tables.get("eval_results", eval_result.tables.get("eval_results_table"))
+
 print(f"per_row is None: {per_row is None}")
 if per_row is not None:
-    print(f"Shape: {per_row.shape}")
-    print(f"Columns: {list(per_row.columns)}")
-    print(f"Has assessments: {'assessments' in per_row.columns}")
-    if 'assessments' in per_row.columns:
-        row0 = per_row.iloc[0]
-        assessments = row0['assessments']
-        print(f"Assessments type: {type(assessments)}")
-        for a in assessments:
-            if isinstance(a, dict) and 'feedback' in a:
-                print(f"  {a['assessment_name']}: {a['feedback'].get('value', 'NO VALUE')}")
-else:
-    print("WARNING: per_row is None — no scores will be saved")
+    print(f"Shape: {per_row.shape}, Columns: {list(per_row.columns)}")
 
 evaluation_id = save_eval_results_to_table(
     spark=spark,
     eval_result={
-        "per_row_df": eval_result.tables.get("eval_results", eval_result.tables.get("eval_results_table")),
+        "per_row_df": per_row,
         "passed": gate_passed,
-        "metrics": eval_result.metrics,
+        "metrics": eval_metrics,
     },
     catalog=catalog,
     audit_schema=audit_schema,
@@ -316,16 +332,29 @@ print(f"Pre-deployment results saved: evaluation_id={evaluation_id}")
 step = pipeline.start_step("guardrail_evaluation", step_order=1, step_type="pre_eval", depends_on="vector_search_setup")
 pipeline.end_step(step, status="COMPLETED", output_summary={
     "block_accuracy": guardrail_results["block_accuracy"],
+    "pass_accuracy": guardrail_results["pass_accuracy"],
     "overall_accuracy": guardrail_results["overall_accuracy"],
+    "false_positives": guardrail_results["false_positives"],
+    "false_negatives": guardrail_results["false_negatives"],
 })
 
-step = pipeline.start_step("quality_evaluation", step_order=2, step_type="pre_eval", depends_on="guardrail_evaluation")
-pipeline.end_step(step, status="COMPLETED", output_summary={
-    "accuracy": accuracy_score,
-    "helpfulness": helpfulness_score,
-    "professionalism": professionalism_score,
+# Build full quality summary with all metrics
+quality_summary = {
+    "scorer_mode": scorer_mode,
+    "scorer_groups": {k: len(v) for k, v in scorer_groups.items()},
     "gate_passed": gate_passed,
-})
+    "all_metrics": {k: round(v, 3) if isinstance(v, float) else v for k, v in eval_metrics.items()},
+}
+# Add parallel execution timing if available
+if len(scorer_groups) > 1 and 'parallel_result' in dir():
+    quality_summary["parallel_timing_ms"] = {
+        gname: gresult.get("duration_ms", 0)
+        for gname, gresult in parallel_result.get("group_results", {}).items()
+    }
+    quality_summary["total_eval_duration_ms"] = parallel_result.get("total_duration_ms")
+
+step = pipeline.start_step("quality_evaluation", step_order=2, step_type="pre_eval", depends_on="guardrail_evaluation")
+pipeline.end_step(step, status="COMPLETED", records_processed=len(eval_df), output_summary=quality_summary)
 
 pipeline.end(status="COMPLETED" if gate_passed else "FAILED")
 

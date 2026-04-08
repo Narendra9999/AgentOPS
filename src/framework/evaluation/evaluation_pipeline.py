@@ -169,38 +169,38 @@ def save_eval_results_to_table(
 def run_evaluation(
     eval_dataset: pd.DataFrame,
     scorers: list = None,
+    scorer_groups: dict = None,
     thresholds: dict = None,
     model_endpoint: str = None,
 ) -> dict:
     """
     Run the standardized evaluation pipeline using mlflow.genai.evaluate().
 
-    Uses @scorer functions (LLM-as-judge via Databricks Foundation Model API).
-    No internet downloads needed — no tiktoken, no HuggingFace models.
+    Supports two modes:
+      - scorers: flat list → single sequential evaluate() call
+      - scorer_groups: dict of {group: [scorers]} → parallel evaluate() calls
+        Each group runs in its own thread with a dedicated MLflow trace span.
 
     Args:
         eval_dataset: DataFrame with 'request', 'expected_response' columns
-        scorers: List of @scorer functions for evaluation
+        scorers: Flat list of scorer functions (sequential mode)
+        scorer_groups: Dict of {group_name: [scorers]} from load_scorer_groups() (parallel mode)
         thresholds: Override default thresholds
         model_endpoint: Serving endpoint name to evaluate (for predict_fn)
 
     Returns:
-        dict with pass/fail, metrics, gate results, and per_row_df
+        dict with pass/fail, metrics, gate results, per_row_df, and group timing
     """
     thresholds = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
 
     # Prepare dataset for mlflow.genai.evaluate()
-    # IMPORTANT: drop legacy columns (request, expected_response) AFTER creating
-    # inputs/expectations — MLflow 3.x auto-maps "request" → "inputs" internally,
-    # which overwrites our dict-based inputs column with the raw string.
     eval_df = eval_dataset.copy()
     if "inputs" not in eval_df.columns and "request" in eval_df.columns:
         eval_df["inputs"] = [{"query": r} for r in eval_df["request"]]
     if "expectations" not in eval_df.columns and "expected_response" in eval_df.columns:
         eval_df["expectations"] = [{"expected_response": r} for r in eval_df["expected_response"]]
-    # Keep full eval_df for save_eval_results — only pass subset to mlflow.genai.evaluate()
 
-    # Generate predictions from endpoint if provided (before calling evaluate)
+    # Generate predictions from endpoint if provided
     if model_endpoint and "outputs" not in eval_df.columns:
         logger.info(f"Generating predictions from endpoint: {model_endpoint}")
         outputs = []
@@ -229,15 +229,26 @@ def run_evaluation(
                 outputs.append(f"Error: {e}")
         eval_df["outputs"] = outputs
 
-    # Run evaluation — pass only required columns, no predict_fn
-    # (predict_fn causes MLflow to auto-map columns internally, breaking dict inputs)
-    eval_result = mlflow.genai.evaluate(
-        data=eval_df[["inputs", "outputs", "expectations"]],
-        scorers=scorers or [],
-    )
+    eval_data = eval_df[["inputs", "outputs", "expectations"]]
 
-    # Extract metrics from the result
-    metrics = eval_result.metrics if hasattr(eval_result, "metrics") and eval_result.metrics else {}
+    # Run evaluation — parallel if scorer_groups provided, else sequential
+    group_results = {}
+    if scorer_groups and len(scorer_groups) > 1:
+        from agent_development.agent_evaluation.evaluation.scorer_loader import run_parallel_evaluation
+        parallel_result = run_parallel_evaluation(eval_data, scorer_groups)
+        metrics = parallel_result["metrics"]
+        tables = parallel_result.get("tables", {})
+        group_results = parallel_result.get("group_results", {})
+        logger.info(f"Parallel evaluation: {parallel_result.get('total_duration_ms')}ms total, "
+                    f"groups: {list(group_results.keys())}")
+    else:
+        all_scorers = scorers or []
+        if scorer_groups:
+            all_scorers = [s for group in scorer_groups.values() for s in group]
+        eval_result = mlflow.genai.evaluate(data=eval_data, scorers=all_scorers)
+        metrics = eval_result.metrics if hasattr(eval_result, "metrics") and eval_result.metrics else {}
+        tables = eval_result.tables if hasattr(eval_result, "tables") else {}
+
     logger.info(f"Evaluation metrics: {json.dumps(metrics, indent=2, default=str)}")
 
     # Check against thresholds
@@ -256,21 +267,20 @@ def run_evaluation(
                 all_passed = False
                 logger.warning(f"GATE FAILED: {metric_name} = {actual} (threshold: {threshold})")
 
-    # Extract per-row results — mlflow.genai.evaluate uses "eval_results"
+    # Extract per-row results
     per_row_df = None
-    if hasattr(eval_result, "tables") and eval_result.tables:
-        per_row_df = eval_result.tables.get("eval_results", eval_result.tables.get("eval_results_table"))
+    if tables:
+        per_row_df = tables.get("eval_results", tables.get("eval_results_table"))
 
     if per_row_df is not None:
         logger.info(f"Per-row df: shape={per_row_df.shape}, columns={list(per_row_df.columns)}")
-    else:
-        logger.warning("No per-row results found")
 
     return {
         "passed": all_passed,
         "metrics": metrics,
         "gate_results": gate_results,
         "per_row_df": per_row_df,
+        "group_results": group_results,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

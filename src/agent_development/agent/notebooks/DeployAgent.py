@@ -85,7 +85,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=f"{schema}_audit",
     pipeline_name="deploy_agent", agent_name=agent_name, environment="dev",
-    triggered_by="pipeline", depends_on="pre_deployment_eval", spark=spark,
+    triggered_by="pipeline", depends_on="pre_deployment_eval", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 _step = pipeline.start_step("deploy_endpoint", step_order=1, step_type="deployment", depends_on="pre_deployment_eval")

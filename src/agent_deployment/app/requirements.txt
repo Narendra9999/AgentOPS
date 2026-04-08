@@ -1,0 +1,7 @@
+databricks-langchain[memory]
+databricks-sdk
+mlflow
+fastapi
+uvicorn
+pyyaml
+requests

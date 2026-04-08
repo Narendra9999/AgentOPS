@@ -98,7 +98,7 @@ class PostLLMGuardrails:
     # ── Check: PII leakage in response ─────────────────────────
 
     def _check_pii_leakage(self, user_message: str, response: str, context) -> dict:
-        # Whitelist: user's own identity + common example addresses
+        # Collect emails/identifiers to whitelist (user's own info, example addresses)
         whitelist = {"user@example.com", "example@databricks.com", "your_email@company.com"}
 
         # Domains that are safe in documentation context (not real PII)
@@ -121,6 +121,7 @@ class PostLLMGuardrails:
 
         for pii_type, pattern in RESPONSE_PII_PATTERNS.items():
             matches = re.findall(pattern, response)
+            # Filter out whitelisted values
             flagged = [m for m in matches if m not in whitelist]
 
             # For emails: also filter out safe documentation domains
@@ -133,7 +134,7 @@ class PostLLMGuardrails:
             if flagged:
                 return {
                     "blocked": True,
-                    "reason": f"PII leakage in response: {pii_type}",
+                    "reason": f"PII leakage in response: {pii_type} ({flagged[0][:20]}...)",
                     "message": "I detected potentially sensitive information in my response. Let me provide the information without personal data.",
                 }
         return {"blocked": False}

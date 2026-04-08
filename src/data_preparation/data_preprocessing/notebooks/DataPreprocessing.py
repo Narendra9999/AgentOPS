@@ -37,7 +37,7 @@ from framework.audit.audit_logger import PipelineStepLogger
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=f"{schema}_audit",
     pipeline_name="data_preprocessing", agent_name="", environment="dev",
-    triggered_by="pipeline", depends_on="data_ingestion", spark=spark,
+    triggered_by="pipeline", depends_on="data_ingestion", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 step = pipeline.start_step("chunk_documents", step_order=1, step_type="data_prep", depends_on="data_ingestion")

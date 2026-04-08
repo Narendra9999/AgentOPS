@@ -115,7 +115,7 @@ import json
 pipeline = PipelineStepLogger(
     catalog=catalog, audit_schema=audit_schema,
     pipeline_name="batch_inference", agent_name=agent_name, environment="dev",
-    triggered_by="schedule", spark=spark,
+    triggered_by="schedule", spark=spark, dbutils=dbutils,
 )
 pipeline.start()
 
