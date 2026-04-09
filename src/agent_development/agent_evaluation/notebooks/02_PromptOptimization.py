@@ -230,20 +230,19 @@ def predict_fn(**kwargs):
     else:
         messages.append({"role": "user", "content": str(inputs)})
 
-    # Call the LLM endpoint directly
-    resp = _requests.post(
-        f"{_ws_url}/serving-endpoints/{judge_model}/invocations",
-        headers={"Authorization": f"Bearer {_token}"},
-        json={"messages": messages, "max_tokens": 1024, "temperature": 0.1},
-        timeout=60,
+    # Call via SDK api_client (handles auth internally, supports plain dict messages)
+    from databricks.sdk import WorkspaceClient
+    _w = WorkspaceClient()
+    result = _w.api_client.do(
+        "POST",
+        f"/serving-endpoints/{judge_model}/invocations",
+        body={"messages": messages, "max_tokens": 1024, "temperature": 0.1},
     )
-    resp.raise_for_status()
-    result = resp.json()
     return result["choices"][0]["message"]["content"]
 
-# Quick test
+# Quick validation
 _test = predict_fn(input=[{"role": "user", "content": "What is Delta Lake?"}])
-print(f"Predict function test: {_test[:100]}...")
+print(f"Predict function validated ({len(_test)} chars)")
 
 # COMMAND ----------
 

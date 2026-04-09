@@ -344,14 +344,13 @@ if feedback_type == str:
                 f"Expected: {expected[:500]}\n\nActual: {actual_response[:500]}\n\n"
                 f"Answer with just 'yes' or 'no'."
             )
-            resp = _requests.post(
-                f"{_ws_url}/serving-endpoints/{judge_model}/invocations",
-                headers={"Authorization": f"Bearer {_token}"},
-                json={"messages": [{"role": "user", "content": judge_prompt}], "max_tokens": 10, "temperature": 0},
-                timeout=30,
+            from databricks.sdk import WorkspaceClient as _JW
+            _jw = _JW()
+            _jr = _jw.api_client.do(
+                "POST", f"/serving-endpoints/{judge_model}/invocations",
+                body={"messages": [{"role": "user", "content": judge_prompt}], "max_tokens": 10, "temperature": 0},
             )
-            resp.raise_for_status()
-            answer = resp.json()["choices"][0]["message"]["content"].strip().lower()
+            answer = _jr["choices"][0]["message"]["content"].strip().lower()
             is_good = answer.startswith("yes")
 
             # Log as human-equivalent feedback
