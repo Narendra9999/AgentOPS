@@ -239,11 +239,13 @@ class AgentOPSBase(ChatAgent):
         custom_outputs = {"thread_id": thread_id}
         if user_id:
             custom_outputs["user_id"] = user_id
-        # Diagnostic: surface store status so we can debug from CLI
-        custom_outputs["_store_connected"] = self.session_store._store is not None
+        # Diagnostic: surface store status for debugging (prefix with _ to avoid conflicts)
         store_err = getattr(self.session_store, '_store_error', None)
         if store_err:
             custom_outputs["_store_error"] = store_err[:200]
+        uc_err = getattr(self.session_store, '_uc_last_error', None)
+        if uc_err:
+            custom_outputs["_uc_error"] = uc_err[:200]
         if response.custom_outputs:
             custom_outputs.update(response.custom_outputs)
         response.custom_outputs = custom_outputs

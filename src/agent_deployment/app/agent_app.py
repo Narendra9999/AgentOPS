@@ -47,6 +47,11 @@ LAKEBASE_INSTANCE = os.getenv("LAKEBASE_INSTANCE_NAME")  # For Provisioned mode
 EMBEDDING_ENDPOINT = os.getenv("EMBEDDING_ENDPOINT", "databricks-gte-large-en")
 EMBEDDING_DIMS = int(os.getenv("EMBEDDING_DIMS", "1024"))
 
+# UC Delta audit trail (via SQL Statement Execution API — no Spark needed)
+UC_SESSION_TABLE = os.getenv("UC_SESSION_TABLE", f"{CATALOG}.{SCHEMA}.session_history")
+UC_SESSION_ENABLED = os.getenv("UC_SESSION_ENABLED", "true").lower() == "true"
+SQL_WAREHOUSE_ID = os.getenv("SQL_WAREHOUSE_ID", "")  # empty = auto-discover
+
 # ── Load guardrail config ──
 _config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
 _config = {}
@@ -107,6 +112,112 @@ def _get_store_kwargs() -> dict[str, Any]:
         "embedding_dims": EMBEDDING_DIMS,
         **_get_lakebase_kwargs(),
     }
+
+
+# ── UC Delta Audit Trail (via SQL Statement Execution API) ──
+
+_warehouse_id_cache: str | None = None
+
+
+def _resolve_warehouse() -> str | None:
+    """Find a SQL warehouse for UC writes. Caches result."""
+    global _warehouse_id_cache
+    if _warehouse_id_cache is not None:
+        return _warehouse_id_cache or None
+
+    if SQL_WAREHOUSE_ID:
+        _warehouse_id_cache = SQL_WAREHOUSE_ID
+        return SQL_WAREHOUSE_ID
+
+    try:
+        w = _get_ws()
+        for wh in w.warehouses.list():
+            if wh.warehouse_type and "SERVERLESS" in str(wh.warehouse_type).upper():
+                _warehouse_id_cache = wh.id
+                logger.info(f"Auto-resolved serverless warehouse: {wh.name} ({wh.id})")
+                return wh.id
+        for wh in w.warehouses.list():
+            if wh.state and "RUNNING" in str(wh.state).upper():
+                _warehouse_id_cache = wh.id
+                logger.info(f"Auto-resolved running warehouse: {wh.name} ({wh.id})")
+                return wh.id
+        _warehouse_id_cache = ""
+        return None
+    except Exception as e:
+        logger.error(f"Warehouse discovery failed: {e}")
+        _warehouse_id_cache = ""
+        return None
+
+
+def _esc_sql(s: str) -> str:
+    """Escape single quotes for SQL string literals."""
+    return str(s).replace("'", "''") if s else ""
+
+
+_uc_table_ensured = False
+
+
+def _save_turn_to_uc(
+    thread_id: str, turn_number: int, user_message: str,
+    assistant_response: str, response_time_ms: float,
+    model_endpoint: str = "", trace_id: str = "",
+):
+    """Append a turn to UC Delta table via SQL Statement Execution API."""
+    global _uc_table_ensured
+    if not UC_SESSION_ENABLED:
+        return
+    wh_id = _resolve_warehouse()
+    if not wh_id:
+        logger.warning("No SQL warehouse — skipping UC audit trail")
+        return
+    try:
+        w = _get_ws()
+
+        # Ensure table exists (once per app lifetime)
+        if not _uc_table_ensured:
+            w.statement_execution.execute_statement(
+                warehouse_id=wh_id, catalog=CATALOG, schema=SCHEMA,
+                statement=f"""
+                    CREATE TABLE IF NOT EXISTS {UC_SESSION_TABLE} (
+                        turn_id STRING NOT NULL, session_id STRING NOT NULL,
+                        turn_number INT NOT NULL, user_message STRING,
+                        assistant_response STRING, request_time STRING NOT NULL,
+                        response_time_ms DOUBLE, model_endpoint STRING,
+                        trace_id STRING, metadata STRING
+                    )
+                """,
+                # Omit wait_timeout — use SDK default (synchronous)
+            )
+            _uc_table_ensured = True
+
+        turn_id = str(uuid.uuid4())
+        request_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        stmt = f"""
+            INSERT INTO {UC_SESSION_TABLE}
+            (turn_id, session_id, turn_number, user_message, assistant_response,
+             request_time, response_time_ms, model_endpoint, trace_id, metadata)
+            VALUES (
+                '{_esc_sql(turn_id)}',
+                '{_esc_sql(thread_id)}',
+                {turn_number},
+                '{_esc_sql(user_message[:4000])}',
+                '{_esc_sql(assistant_response[:4000])}',
+                '{_esc_sql(request_time)}',
+                {round(response_time_ms, 2)},
+                '{_esc_sql(model_endpoint)}',
+                '{_esc_sql(trace_id)}',
+                ''
+            )
+        """
+        w.statement_execution.execute_statement(
+            warehouse_id=wh_id, catalog=CATALOG, schema=SCHEMA,
+            statement=stmt,
+            # Omit wait_timeout — use SDK default (synchronous)
+        )
+        logger.info(f"UC(SQL API): saved turn session={thread_id}, turn={turn_number}")
+    except Exception as e:
+        logger.error(f"UC(SQL API) write failed: {e}")
 
 
 # ── Vector Search ──
@@ -423,6 +534,21 @@ async def run_agent(
                     )
                 except Exception as e:
                     logger.warning(f"Failed to save conversation summary: {e}")
+
+            # ── UC Delta audit trail (via SQL Statement API) ──
+            if UC_SESSION_ENABLED:
+                try:
+                    turn_count = sum(1 for m in all_messages if m.get("role") == "user")
+                    _save_turn_to_uc(
+                        thread_id=thread_id,
+                        turn_number=turn_count,
+                        user_message=user_message,
+                        assistant_response=response_text,
+                        response_time_ms=(time.time() - start_time) * 1000,
+                        model_endpoint=LLM_ENDPOINT,
+                    )
+                except Exception as e:
+                    logger.warning(f"UC audit trail write failed: {e}")
 
         latency_ms = (time.time() - start_time) * 1000
         root_span.set_attributes({

@@ -28,9 +28,11 @@ session_history:
   enabled: true
 
   # Unity Catalog Delta table — append-only, queryable via SQL/Spark
+  # Works everywhere: Spark SQL on clusters, SQL Statement API on Model Serving/Apps
   unity_catalog:
     enabled: true
     table: session_history           # Stored as {catalog}.{schema}.{table}
+    warehouse_id: 3c623898df7d3c96    # Serverless SQL warehouse (or "auto" to auto-discover)
     # Columns auto-created: session_id, turn_number, role, content,
     #   request_time, response_time_ms, model_endpoint, trace_id
 

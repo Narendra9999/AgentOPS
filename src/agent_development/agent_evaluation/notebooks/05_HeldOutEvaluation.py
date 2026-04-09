@@ -1,17 +1,17 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 09 — Held-Out Evaluation
+# MAGIC # 05 — Held-Out Evaluation
 # MAGIC Compares agent configurations on the same held-out question set with the aligned judge.
 # MAGIC
 # MAGIC **Configurations compared:**
 # MAGIC 1. **Baseline** — Original agent with config.yaml system prompt
-# MAGIC 2. **Optimized Prompt** — Agent with GEPA-optimized prompt (from 06)
-# MAGIC 3. **Optimized Prompt + Skills** — Agent with optimized prompt + skill files (from 08)
+# MAGIC 2. **Optimized Prompt** — Agent with GEPA-optimized prompt (from 02)
+# MAGIC 3. **Optimized Prompt + Skills** — Agent with optimized prompt + skill files (from 04)
 # MAGIC
 # MAGIC **Prerequisites:**
-# MAGIC - Aligned judge registered (from 05)
-# MAGIC - Optimized prompt in Prompt Registry (from 06)
-# MAGIC - Agent with skills model registered (from 08)
+# MAGIC - Aligned judge registered (from 01)
+# MAGIC - Optimized prompt in Prompt Registry (from 02)
+# MAGIC - Agent with skills model registered (from 04)
 # MAGIC
 # MAGIC **Reference:** Notebook 09-Evaluation from at-bat-assistant
 
@@ -159,6 +159,39 @@ try:
     )
 except Exception:
     pass
+
+# Wrap aligned judge in a @scorer so evaluate() can aggregate metrics.
+# get_scorer() returns a judge whose __call__ output isn't captured by evaluate()
+# as metrics. We wrap it to return a Feedback object that evaluate() understands.
+from mlflow.genai.scorers import scorer
+from mlflow.entities import Feedback
+
+_raw_judge = aligned_judge
+
+@scorer
+def response_quality(inputs, outputs, expectations=None):
+    """Evaluates response quality using the aligned judge."""
+    try:
+        result = _raw_judge(inputs=inputs, outputs=outputs, expectations=expectations)
+        # Convert judge result to Feedback
+        if isinstance(result, Feedback):
+            return result
+        elif isinstance(result, bool):
+            return Feedback(value=result, rationale="Aligned judge assessment")
+        elif isinstance(result, (int, float)):
+            return Feedback(value=float(result), rationale="Aligned judge assessment")
+        elif isinstance(result, str):
+            is_yes = result.strip().lower() in ("yes", "true", "1")
+            return Feedback(value=is_yes, rationale=result)
+        elif hasattr(result, "value"):
+            return Feedback(value=result.value, rationale=getattr(result, "rationale", ""))
+        else:
+            return Feedback(value=str(result), rationale=f"Raw judge output: {type(result).__name__}")
+    except Exception as e:
+        return Feedback(value=False, rationale=f"Judge error: {str(e)[:200]}")
+
+aligned_judge = response_quality
+print(f"Wrapped aligned judge as @scorer 'response_quality' for evaluate() compatibility")
 
 # Load original prompt from config
 nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]

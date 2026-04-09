@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 06 — Prompt Optimization with GEPA
+# MAGIC # 02 — Prompt Optimization with GEPA
 # MAGIC Runs GEPA prompt optimization using the aligned judge from notebook 05 as the scorer.
 # MAGIC
 # MAGIC **Prerequisites:**

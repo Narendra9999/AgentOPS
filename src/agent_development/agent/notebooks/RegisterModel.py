@@ -143,7 +143,10 @@ print("Installed on cluster for validation")
 
 # COMMAND ----------
 
-from mlflow.models.resources import DatabricksServingEndpoint, DatabricksVectorSearchIndex
+from mlflow.models.resources import (
+    DatabricksServingEndpoint, DatabricksVectorSearchIndex,
+    DatabricksSQLWarehouse, DatabricksTable,
+)
 from mlflow.utils.environment import _mlflow_conda_env
 import yaml
 
@@ -168,7 +171,7 @@ with open(_runtime_config, "w") as f:
 print("Merged runtime config:")
 print(yaml.dump(_agent_config, default_flow_style=False)[:500])
 
-# Resource declarations
+# Resource declarations — these grant Model Serving system auth access
 _llm_endpoint = _agent_config["llm"]["endpoint"]
 _vs_index_name = _agent_config.get("vector_search", {}).get("index", "")
 _vs_index_fq = f"{catalog}.{schema}.{_vs_index_name}" if _vs_index_name and "." not in _vs_index_name else _vs_index_name
@@ -177,6 +180,23 @@ resources = [
     DatabricksServingEndpoint(endpoint_name=_llm_endpoint),
     DatabricksVectorSearchIndex(index_name=_vs_index_fq),
 ]
+
+# Declare SQL warehouse so Model Serving can write to UC Delta via SQL Statement API
+_session_cfg = _agent_config.get("session_history", {})
+_uc_cfg = _session_cfg.get("unity_catalog", {})
+_warehouse_id = _uc_cfg.get("warehouse_id", "")
+if _uc_cfg.get("enabled") and _warehouse_id and _warehouse_id != "auto":
+    resources.append(DatabricksSQLWarehouse(warehouse_id=_warehouse_id))
+    print(f"Resource: SQL Warehouse {_warehouse_id}")
+
+# Declare UC session history table so Model Serving can read/write it
+_uc_table = _uc_cfg.get("table", "")
+if _uc_cfg.get("enabled") and _uc_table:
+    _uc_table_fq = f"{catalog}.{schema}.{_uc_table}"
+    resources.append(DatabricksTable(table_name=_uc_table_fq))
+    print(f"Resource: UC Table {_uc_table_fq}")
+
+print(f"Total resources declared: {len(resources)}")
 
 input_example = {"messages": [{"role": "user", "content": "What is Delta Lake?"}]}
 model_name = f"{catalog}.{schema}.{agent_name}"

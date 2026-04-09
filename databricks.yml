@@ -6,6 +6,7 @@ include:
   - resources/rag-pipeline-resource.yml
   - resources/monitoring-resource.yml
   - resources/batch-inference-resource.yml
+  - resources/iterative-improvement-resource.yml
   # Uncomment to deploy as Databricks App with Lakebase memory
   # (enables session history + long-term user memory via Lakebase Autoscaling)
   - resources/app-resource.yml

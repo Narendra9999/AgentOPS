@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 07 — Agent Skill Generation with optimize_anything
+# MAGIC # 03 — Agent Skill Generation with optimize_anything
 # MAGIC Uses GEPA's `optimize_anything` to generate modular skill files from:
 # MAGIC - Tool signatures (vector search, LLM endpoint)
-# MAGIC - Optimized system prompt (from 06)
-# MAGIC - Aligned judge memory (from 05)
+# MAGIC - Optimized system prompt (from 02)
+# MAGIC - Aligned judge memory (from 01)
 # MAGIC - Evaluated traces with expert feedback
 # MAGIC
 # MAGIC **Prerequisites:**
@@ -48,9 +48,9 @@ MAX_METRIC_CALLS = int(dbutils.widgets.get("max_metric_calls"))
 import subprocess, os
 _vol_path = "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs"
 if os.path.exists(_vol_path):
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "gepa", "--find-links", _vol_path, "--no-index", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _vol_path, "--no-index", "-q"])
 else:
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4", "dspy>=2.6", "gepa", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4", "dspy>=2.6", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------

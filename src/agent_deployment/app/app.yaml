@@ -23,4 +23,12 @@ env:
   - name: VS_NUM_RESULTS
     value: "5"
 
+  # UC Delta audit trail (via SQL Statement Execution API)
+  - name: UC_SESSION_ENABLED
+    value: "true"
+  - name: UC_SESSION_TABLE
+    value: classic_stable_cykcbe_catalog.agentops.session_history
+  - name: SQL_WAREHOUSE_ID
+    value: 3c623898df7d3c96
+
 command: ["python", "server.py"]

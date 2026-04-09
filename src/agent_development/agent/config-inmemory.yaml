@@ -1,0 +1,267 @@
+# ============================================================================
+# Config Variant: In-Memory Only (No Persistence)
+# ============================================================================
+# ** RECOMMENDED FOR MODEL SERVING ENDPOINTS **
+#
+# Multi-turn conversation handled within a single request via message history
+# passed by the client (custom_inputs.thread_id). No server-side persistence.
+#
+# Works on: Everything (Model Serving, Apps, Clusters, Notebooks)
+# Requires: Nothing — no Lakebase, no SQL warehouse, no Delta tables
+#
+# When to use this for Model Serving:
+#   - Simplest option — no infrastructure dependencies, zero setup
+#   - If you don't need server-side session persistence
+#   - Note: Model Serving CAN use UC Delta + Lakebase via system auth
+#     if you declare resources when logging the model (see config-uc-only.yaml)
+#   - With this config, the agent runs fully stateless — no external calls for state
+#
+# You still get full audit data from:
+#   - Inference tables (auto-capture every request/response)
+#   - MLflow traces (every request generates a trace)
+#   - Pipeline eval steps (smoke test + post-eval write to UC via Spark)
+#
+# How multi-turn works without server-side persistence:
+#   - The client sends the full message history in each request
+#   - AgentOPSBase uses max_history_turns to truncate if too long
+#   - No state is stored between requests — stateless endpoint
+#
+# To use: copy this file to config.yaml before deploying
+# ============================================================================
+
+agent:
+  name: databricks_docs_agent
+  description: "Databricks Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: mastercard_platform
+    agentops.use_case: databricks_docs
+
+catalog: classic_stable_cykcbe_catalog
+schema: agentops
+
+llm:
+  endpoint: databricks-gpt-oss-120b
+  max_tokens: 2048
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+# ── Session: Disabled (stateless) ──
+# No server-side history persistence.
+# Multi-turn is client-managed: pass full message history in each request.
+session_history:
+  enabled: false
+
+  unity_catalog:
+    enabled: false
+
+  lakebase:
+    enabled: false
+
+long_term_memory:
+  enabled: false
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: databricks_docs_index
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+system_prompt: |
+  You are a Databricks Documentation Assistant. You help users understand:
+  - Databricks products and features (Unity Catalog, Delta Lake, MLflow, etc.)
+  - API usage and SDK integration patterns
+  - Coding best practices on the Databricks platform
+  - Configuration, deployment, and troubleshooting
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Include code snippets when relevant
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Keep responses concise and actionable
+
+evaluation:
+  scorer_mode: all
+  quality_gate_threshold: 3.5
+  judge_model: databricks-meta-llama-3-3-70b-instruct
+
+  builtin_scorers:
+    guidelines:
+      enabled: true
+      name: response_quality
+      rules:
+        - "The response must directly address the user's question"
+        - "The response must not include fabricated information"
+        - "The response must be concise and well-structured"
+        - "The response must reference Databricks-specific features when applicable"
+    correctness:
+      enabled: true
+    relevance_to_query:
+      enabled: true
+    safety:
+      enabled: true
+    retrieval_groundedness:
+      enabled: false
+
+  llm_judge_scorers:
+    accuracy:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    helpfulness:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    professionalism:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    docs_relevance:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    code_snippet_quality:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    source_citation:
+      enabled: true
+      weight: 0.8
+      threshold: null
+    answer_completeness:
+      enabled: true
+      weight: 1.0
+      threshold: null
+
+  domain_scorers:
+    - name: databricks_terminology
+      enabled: true
+      type: guidelines
+      weight: 1.0
+      threshold: null
+      rules:
+        - "Must use correct Databricks product names (Unity Catalog, not 'data catalog')"
+        - "Must distinguish between Databricks-specific and generic Spark features"
+        - "Must reference the correct API version (e.g., DataFrame API v2, not deprecated RDD API)"
+
+    - name: security_compliance
+      enabled: true
+      type: guidelines
+      weight: 1.5
+      threshold: 4.0
+      rules:
+        - "Must not expose internal architecture details or security configurations"
+        - "Must not suggest disabling security features (e.g., 'turn off ACLs')"
+        - "Must recommend least-privilege access patterns"
+
+guardrails:
+  enabled: true
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+    domain_context_keywords:
+      - databricks
+      - spark
+      - delta
+      - catalog
+      - unity
+      - mlflow
+      - notebook
+      - cluster
+      - warehouse
+      - pipeline
+      - lakehouse
+      - api
+      - sdk
+      - table
+      - schema
+      - volume
+      - model
+      - endpoint
+      - job
+      - workflow
+      - kill
+      - terminate
+    intent_keywords:
+      databricks_query:
+        - databricks
+        - spark
+        - delta
+        - unity catalog
+        - mlflow
+        - notebook
+        - cluster
+        - warehouse
+        - sql
+        - pipeline
+        - lakehouse
+        - api
+        - sdk
+        - pyspark
+        - dbutils
+        - autoloader
+        - medallion
+        - streaming
+        - serving
+        - endpoint
+        - model
+        - vector search
+        - bundle
+        - dab
+        - job
+        - workflow
+        - volume
+        - schema
+        - catalog
+        - table
+        - python
+        - code
+        - function
+        - how to
+        - how do
+        - what is
+        - create
+        - configure
+        - deploy
+        - error
+        - fix
+        - best practice
+      general_greeting:
+        - hello
+        - hi
+        - hey
+        - help
+        - good morning
+        - good afternoon
+        - what can you
+        - who are you
+    allowed_intents:
+      - databricks_query
+      - general_greeting
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+    min_response_length: 20

@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 05 — Judge Alignment with MemAlign
+# MAGIC # 01 — Judge Alignment with MemAlign
 # MAGIC Aligns the evaluation judge with SME (Subject Matter Expert) feedback using MemAlign.
 # MAGIC
 # MAGIC **Prerequisites:**
@@ -165,7 +165,7 @@ for trace in traces_with_human_feedback:
         if source_type == "HUMAN" and a.name != "expected_response":
             source_id = getattr(a.source, "source_id", "") if hasattr(a, "source") else ""
             val = getattr(a, "boolean_value", getattr(a, "numeric_value", getattr(a, "value", "?")))
-            rationale = getattr(a, "rationale", "")[:100]
+            rationale = (getattr(a, "rationale", "") or "")[:100]
             print(f"  {trace.info.request_id[:30]}... name='{a.name}' value={val} by={source_id} reason={rationale}")
             _shown += 1
     if _shown >= 10:

@@ -1,0 +1,46 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#E8F5E9', 'primaryTextColor': '#1B5E20', 'primaryBorderColor': '#A5D6A7', 'lineColor': '#546E7A', 'secondaryColor': '#E3F2FD', 'tertiaryColor': '#F5F5F5', 'background': '#FFFFFF', 'clusterBkg': '#FAFAFA', 'titleColor': '#37474F', 'edgeLabelBackground': '#FFFFFF', 'fontFamily': 'Segoe UI, Arial, sans-serif', 'fontSize': '13px'}}}%%
+flowchart LR
+    subgraph UC["UC Delta Only  ·  config-uc-only.yaml"]
+        direction TB
+        UA(["User Request"]):::startEndUC --> UB["Load History"]:::processUC
+        UB --> UC1{"Spark?"}:::decisionUC
+        UC1 -->|Yes| UC2["Spark SQL\nSELECT FROM session_history"]:::ucNode
+        UC1 -->|No| UC3["SQL Statement API\nSQL Warehouse"]:::ucNode
+        UC2 --> UD["Agent Processing\nguardrails → search → LLM"]:::processUC
+        UC3 --> UD
+        UD --> UE["Save Turn"]:::processUC
+        UE --> UF{"Spark?"}:::decisionUC
+        UF -->|Yes| UG["Spark\ndf.write.saveAsTable()"]:::ucNode
+        UF -->|No| UH["SQL Statement API\nINSERT INTO"]:::ucNode
+        UG --> UI(["Response"]):::startEndUC
+        UH --> UI
+    end
+
+    subgraph LB["Lakebase Full  ·  config-lakebase.yaml"]
+        direction TB
+        LA(["User Request\nthread_id · user_id"]):::startEndLB --> LB1["Load History\nLakebase DatabricksStore"]:::lbNode
+        LB1 --> LB2["Recall User Memories\nsemantic search"]:::lbNode
+        LB2 --> LC["Agent Processing\nguardrails → search → LLM\n+ memory tools"]:::processLB
+        LC --> LD["Save to Lakebase\nconversation state"]:::lbNode
+        LD --> LE["Save to UC Delta\naudit trail"]:::lbNode
+        LE --> LF["Save Conversation Summary\nlong-term memory"]:::lbNode
+        LF --> LG(["Response"]):::startEndLB
+    end
+
+    subgraph IM["In-Memory  ·  config-inmemory.yaml"]
+        direction TB
+        IA(["User Request\nfull history in messages"]):::startEndIM --> IB["Agent Processing\nguardrails → search → LLM"]:::processIM
+        IB --> IC(["Response\nno state saved"]):::startEndIM
+    end
+
+    classDef startEndUC fill:#C8E6C9,stroke:#388E3C,stroke-width:2px,color:#1B5E20,font-weight:bold
+    classDef processUC fill:#E8F5E9,stroke:#81C784,stroke-width:1.5px,color:#2E7D32
+    classDef decisionUC fill:#F1F8E9,stroke:#AED581,stroke-width:1.5px,color:#33691E
+    classDef ucNode fill:#DCEDC8,stroke:#558B2F,stroke-width:1.5px,color:#1B5E20
+
+    classDef startEndLB fill:#BBDEFB,stroke:#1565C0,stroke-width:2px,color:#0D47A1,font-weight:bold
+    classDef processLB fill:#E3F2FD,stroke:#90CAF9,stroke-width:1.5px,color:#1565C0
+    classDef lbNode fill:#BBDEFB,stroke:#1E88E5,stroke-width:1.5px,color:#0D47A1
+
+    classDef startEndIM fill:#EEEEEE,stroke:#757575,stroke-width:2px,color:#212121,font-weight:bold
+    classDef processIM fill:#F5F5F5,stroke:#BDBDBD,stroke-width:1.5px,color:#424242

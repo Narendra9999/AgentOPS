@@ -54,6 +54,9 @@ class SessionStore:
         self.uc_enabled = self.enabled and uc_cfg.get("enabled", False)
         self.uc_table_name = uc_cfg.get("table", "session_history")
         self.uc_full_table = f"{self.catalog}.{self.schema}.{self.uc_table_name}" if self.catalog else self.uc_table_name
+        # Warehouse ID: env var > config > auto-discover
+        import os
+        self.warehouse_id = os.getenv("SQL_WAREHOUSE_ID") or uc_cfg.get("warehouse_id", "auto")
 
         # Lakebase backend (DatabricksStore — short-term + long-term memory)
         lakebase_cfg = session_cfg.get("lakebase", {})
@@ -68,6 +71,8 @@ class SessionStore:
         # Lazy-initialized DatabricksStore
         self._store = None
         self._store_attempted = False
+        self._resolved_warehouse_id = None  # Lazy-resolved SQL warehouse
+        self._uc_last_error = None  # Last UC write/read error for diagnostics
 
         if self.enabled:
             backends = []
@@ -246,13 +251,26 @@ class SessionStore:
     # ── Read Methods (UC Delta) ──────────────────────────────────────
 
     def _read_from_uc(self, session_id: str, max_turns: int) -> list[dict]:
-        """Read session history from UC Delta table via Spark SQL."""
+        """Read session history from UC Delta table.
+
+        Tries Spark SQL first (notebooks/clusters), falls back to
+        SQL Statement Execution API (Model Serving, Apps, anywhere).
+        """
+        # Try Spark first (zero-latency if available)
         try:
             from pyspark.sql import SparkSession
             spark = SparkSession.getActiveSession()
-            if not spark:
-                return []
+            if spark:
+                return self._read_from_uc_spark(spark, session_id, max_turns)
+        except ImportError:
+            pass
 
+        # Fallback: SQL Statement Execution API (works from Model Serving/Apps)
+        return self._read_from_uc_sql_api(session_id, max_turns)
+
+    def _read_from_uc_spark(self, spark, session_id: str, max_turns: int) -> list[dict]:
+        """Read via Spark SQL (notebook/cluster context)."""
+        try:
             df = spark.sql(f"""
                 SELECT turn_number, user_message, assistant_response
                 FROM {self.uc_full_table}
@@ -261,7 +279,6 @@ class SessionStore:
                 LIMIT {max_turns}
             """).collect()
 
-            # Build message list in chronological order
             messages = []
             for row in reversed(df):
                 if row.user_message:
@@ -269,10 +286,44 @@ class SessionStore:
                 if row.assistant_response:
                     messages.append({"role": "assistant", "content": row.assistant_response})
 
-            logger.info(f"Read {len(df)} turns from UC for session {session_id}")
+            logger.info(f"UC(Spark): read {len(df)} turns for session {session_id}")
             return messages
         except Exception as e:
-            logger.error(f"Failed to read session from UC: {e}")
+            logger.error(f"UC(Spark) read failed: {e}")
+            return []
+
+    def _read_from_uc_sql_api(self, session_id: str, max_turns: int) -> list[dict]:
+        """Read via SQL Statement Execution API (no Spark needed)."""
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+
+            safe_id = session_id.replace("'", "''")
+            resp = self._exec_sql(w, f"""
+                SELECT turn_number, user_message, assistant_response
+                FROM {self.uc_full_table}
+                WHERE session_id = '{safe_id}'
+                ORDER BY turn_number DESC
+                LIMIT {max_turns}
+            """)
+
+            if not resp.result or not resp.result.data_array:
+                return []
+
+            messages = []
+            for row in reversed(resp.result.data_array):
+                user_msg = row[1] if len(row) > 1 else ""
+                asst_msg = row[2] if len(row) > 2 else ""
+                if user_msg:
+                    messages.append({"role": "user", "content": user_msg})
+                if asst_msg:
+                    messages.append({"role": "assistant", "content": asst_msg})
+
+            logger.info(f"UC(SQL API): read {len(resp.result.data_array)} turns for session {session_id}")
+            return messages
+        except Exception as e:
+            self._uc_last_error = f"read: {e}"
+            logger.error(f"UC(SQL API) read failed: {e}")
             return []
 
     # ── Write Methods ────────────────────────────────────────────────
@@ -336,38 +387,58 @@ class SessionStore:
 
         # UC Delta: save individual turn (audit trail)
         if self.uc_enabled:
-            user_turns = sum(1 for m in messages if _get_role(m) == "user")
-            user_message = ""
-            for m in reversed(messages):
-                if _get_role(m) == "user":
-                    user_message = _get_content(m)
-                    break
+            try:
+                user_turns = sum(1 for m in messages if _get_role(m) == "user")
+                user_message = ""
+                for m in reversed(messages):
+                    if _get_role(m) == "user":
+                        user_message = _get_content(m)
+                        break
 
-            self.save_turn(
-                session_id=session_id,
-                turn_number=user_turns,
-                user_message=user_message,
-                assistant_response=response_text,
-                response_time_ms=response_time_ms,
-                model_endpoint=model_endpoint,
-                trace_id=trace_id,
-                extra_metadata=extra_metadata,
-            )
+                self.save_turn(
+                    session_id=session_id,
+                    turn_number=user_turns,
+                    user_message=user_message,
+                    assistant_response=response_text,
+                    response_time_ms=response_time_ms,
+                    model_endpoint=model_endpoint,
+                    trace_id=trace_id,
+                    extra_metadata=extra_metadata,
+                )
+                # Don't overwrite — _save_to_uc_sql_api sets _uc_last_error directly
+            except Exception as e:
+                self._uc_last_error = f"save_full_session: {e}"
+                logger.error(f"UC save failed in save_full_session: {e}")
 
     # ── Unity Catalog Backend ────────────────────────────────────────
 
     def _save_to_uc(self, record: dict):
-        """Append a turn record to a Unity Catalog Delta table via Spark."""
+        """Append a turn record to UC Delta table.
+
+        Tries Spark first (notebooks/clusters), falls back to
+        SQL Statement Execution API (Model Serving, Apps, anywhere).
+        """
+        # Try Spark first
         try:
             from pyspark.sql import SparkSession
+            spark = SparkSession.getActiveSession()
+            if spark:
+                self._uc_write_path = "spark"
+                self._save_to_uc_spark(spark, record)
+                return
+        except ImportError:
+            pass
+
+        # Fallback: SQL Statement Execution API
+        self._uc_write_path = "sql_api"
+        self._save_to_uc_sql_api(record)
+
+    def _save_to_uc_spark(self, spark, record: dict):
+        """Write via Spark DataFrame (notebook/cluster context)."""
+        try:
             from pyspark.sql.types import (
                 StructType, StructField, StringType, IntegerType, DoubleType,
             )
-
-            spark = SparkSession.getActiveSession()
-            if not spark:
-                logger.warning("No active Spark session — skipping UC session save")
-                return
 
             schema = StructType([
                 StructField("turn_id", StringType(), False),
@@ -397,10 +468,138 @@ class SessionStore:
 
             df = spark.createDataFrame([row], schema=schema)
             df.write.mode("append").option("mergeSchema", "true").saveAsTable(self.uc_full_table)
-            logger.info(f"UC: saved turn session={record['session_id']}, turn={record['turn_number']}")
-
+            logger.info(f"UC(Spark): saved turn session={record['session_id']}, turn={record['turn_number']}")
         except Exception as e:
-            logger.error(f"Failed to save session to UC: {e}")
+            logger.error(f"UC(Spark) write failed: {e}")
+
+    def _exec_sql(self, w, statement: str) -> object:
+        """Execute a SQL statement via SQL Statement Execution API with proper status checking."""
+        from databricks.sdk.service.sql import StatementState
+        from datetime import timedelta
+
+        wh_id = self._resolve_warehouse_id()
+        if not wh_id:
+            raise RuntimeError("No SQL warehouse configured")
+
+        # Omit wait_timeout to use SDK default (synchronous execution).
+        # Explicit values like "30s" or timedelta fail on some SDK versions.
+        resp = w.statement_execution.execute_statement(
+            warehouse_id=wh_id,
+            statement=statement,
+        )
+
+        state = resp.status.state if resp.status else None
+        if state != StatementState.SUCCEEDED:
+            error_info = getattr(resp.status, 'error', None)
+            raise RuntimeError(
+                f"SQL failed: state={state}, error={error_info}"
+            )
+        return resp
+
+    def _save_to_uc_sql_api(self, record: dict):
+        """Write via SQL Statement Execution API (no Spark needed).
+
+        Creates the table if it doesn't exist, then INSERTs the turn record.
+        Works from Model Serving (with declared resources), Databricks Apps,
+        or any SDK-authenticated context.
+        """
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+
+            # Ensure table exists (once per session lifetime)
+            if not getattr(self, "_uc_table_ensured", False):
+                self._exec_sql(w, f"""
+                    CREATE TABLE IF NOT EXISTS {self.uc_full_table} (
+                        turn_id STRING NOT NULL,
+                        session_id STRING NOT NULL,
+                        turn_number INT NOT NULL,
+                        user_message STRING,
+                        assistant_response STRING,
+                        request_time STRING NOT NULL,
+                        response_time_ms DOUBLE,
+                        model_endpoint STRING,
+                        trace_id STRING,
+                        metadata STRING
+                    )
+                """)
+                self._uc_table_ensured = True
+
+            def esc(s):
+                return str(s).replace("'", "''") if s else ""
+
+            stmt = f"""
+                INSERT INTO {self.uc_full_table}
+                (turn_id, session_id, turn_number, user_message, assistant_response,
+                 request_time, response_time_ms, model_endpoint, trace_id, metadata)
+                VALUES (
+                    '{esc(record["turn_id"])}',
+                    '{esc(record["session_id"])}',
+                    {record["turn_number"]},
+                    '{esc(record.get("user_message", ""))}',
+                    '{esc(record.get("assistant_response", ""))}',
+                    '{esc(record["request_time"])}',
+                    {record.get("response_time_ms", 0.0)},
+                    '{esc(record.get("model_endpoint", ""))}',
+                    '{esc(record.get("trace_id", ""))}',
+                    '{esc(record.get("metadata", ""))}'
+                )
+            """
+            self._exec_sql(w, stmt)
+
+            # Verify: read back immediately to confirm data landed
+            safe_sid = record["session_id"].replace("'", "''")
+            verify = self._exec_sql(w, f"""
+                SELECT COUNT(*) as cnt FROM {self.uc_full_table}
+                WHERE session_id = '{safe_sid}' AND turn_id = '{record["turn_id"]}'
+            """)
+            rows = verify.result.data_array if verify.result else []
+            count = int(rows[0][0]) if rows else 0
+            if count > 0:
+                self._uc_last_error = None
+                logger.info(f"UC(SQL API): saved+verified turn session={record['session_id']}, turn={record['turn_number']}")
+            else:
+                self._uc_last_error = f"write_unverified: INSERT SUCCEEDED but SELECT found 0 rows"
+                logger.error(f"UC(SQL API): INSERT claimed SUCCEEDED but verification found 0 rows for session={record['session_id']}")
+        except Exception as e:
+            self._uc_last_error = f"write: {e}"
+            logger.error(f"UC(SQL API) write failed: {e}")
+
+    # ── Warehouse Resolution ────────────────────────────────────────
+
+    def _resolve_warehouse_id(self) -> Optional[str]:
+        """Resolve warehouse_id — use configured value, or auto-discover a serverless warehouse."""
+        if self._resolved_warehouse_id is not None:
+            return self._resolved_warehouse_id
+
+        if self.warehouse_id and self.warehouse_id != "auto":
+            self._resolved_warehouse_id = self.warehouse_id
+            return self.warehouse_id
+
+        # Auto-discover: find a running or serverless SQL warehouse
+        try:
+            from databricks.sdk import WorkspaceClient
+            w = WorkspaceClient()
+            warehouses = w.warehouses.list()
+            for wh in warehouses:
+                # Prefer serverless (instant startup, scale to zero)
+                if wh.warehouse_type and "SERVERLESS" in str(wh.warehouse_type).upper():
+                    self._resolved_warehouse_id = wh.id
+                    logger.info(f"Auto-resolved serverless warehouse: {wh.name} ({wh.id})")
+                    return wh.id
+            # Fallback: any running warehouse
+            for wh in w.warehouses.list():
+                if wh.state and "RUNNING" in str(wh.state).upper():
+                    self._resolved_warehouse_id = wh.id
+                    logger.info(f"Auto-resolved running warehouse: {wh.name} ({wh.id})")
+                    return wh.id
+            logger.warning("No SQL warehouse found for UC session history")
+            self._resolved_warehouse_id = ""
+            return None
+        except Exception as e:
+            logger.error(f"Warehouse auto-discovery failed: {e}")
+            self._resolved_warehouse_id = ""
+            return None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

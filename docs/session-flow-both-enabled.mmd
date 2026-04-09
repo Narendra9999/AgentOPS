@@ -1,0 +1,42 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#E3F2FD', 'primaryTextColor': '#1A237E', 'primaryBorderColor': '#90CAF9', 'lineColor': '#546E7A', 'secondaryColor': '#E8F5E9', 'tertiaryColor': '#FFF8E1', 'background': '#FFFFFF', 'mainBkg': '#E3F2FD', 'nodeBorder': '#90CAF9', 'clusterBkg': '#F5F5F5', 'titleColor': '#1A237E', 'edgeLabelBackground': '#FFFFFF', 'fontFamily': 'Segoe UI, Arial, sans-serif', 'fontSize': '13px'}}}%%
+flowchart TD
+    A(["User Request\nmessages · thread_id · user_id"]):::startEnd --> B["Load Session History"]:::process
+
+    B --> B1{"Lakebase\nenabled?"}:::decision
+    B1 -->|Yes| B2["Read from Lakebase\nDatabricksStore\nnamespace: conversations\nkey: thread_id"]:::lakebase
+    B2 --> B3{"History\nfound?"}:::decision
+    B3 -->|Yes| C["Prepend history\nto messages"]:::process
+    B3 -->|No| B4{"UC Delta\nenabled?"}:::decision
+    B1 -->|No| B4
+    B4 -->|Yes| B5{"Spark\navailable?"}:::decision
+    B5 -->|Yes| B6["Read via Spark SQL"]:::uc
+    B5 -->|No| B7["Read via\nSQL Statement API\nSQL Warehouse"]:::uc
+    B6 --> C
+    B7 --> C
+    B4 -->|No| C
+
+    C --> D["Recall Long-Term Memory\nLakebase semantic search\nnamespace: users/user_id"]:::lakebase
+    D --> E["Pre-LLM Guardrails\nwith conversation context"]:::llm
+    E --> F["Vector Search\nretrieve docs"]:::process
+    F --> G["Build Augmented Prompt\nsystem + docs + memories + history"]:::llm
+    G --> H["Call LLM\nwith memory tools if user_id"]:::llm
+    H --> I["Post-LLM Guardrails\nPII whitelist · compliance"]:::llm
+
+    I --> J["Save Session History"]:::process
+    J --> J1["Lakebase: Save full\nconversation state\noverwrite per thread_id"]:::lakebase
+    J --> J2["UC Delta: Append\nindividual turn record\naudit trail"]:::uc
+    J2 --> J3{"Spark\navailable?"}:::decision
+    J3 -->|Yes| J4["Write via Spark\ndf.write.saveAsTable()"]:::uc
+    J3 -->|No| J5["Write via\nSQL Statement API\nINSERT INTO session_history"]:::uc
+
+    J1 --> K["Save Conversation Summary\nLakebase long-term memory"]:::lakebase
+    J4 --> L(["Return Response"]):::startEnd
+    J5 --> L
+    K --> L
+
+    classDef startEnd fill:#F3E5F5,stroke:#AB47BC,stroke-width:2px,color:#4A148C,font-weight:bold,rx:20
+    classDef process fill:#ECEFF1,stroke:#78909C,stroke-width:1.5px,color:#263238
+    classDef decision fill:#FFF9C4,stroke:#F9A825,stroke-width:1.5px,color:#33261D
+    classDef lakebase fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#0D47A1
+    classDef uc fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
+    classDef llm fill:#FFF8E1,stroke:#FFB300,stroke-width:2px,color:#4E342E

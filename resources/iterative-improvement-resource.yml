@@ -6,7 +6,7 @@
 #   2. Labels logged via MLflow UI / Review App with assessments
 #
 # Pipeline flow:
-#   05_JudgeAlignment → 06_PromptOptimization → 07_SkillGeneration → 08_AgentWithSkills → 09_HeldOutEvaluation
+#   01_JudgeAlignment → 02_PromptOptimization → 03_SkillGeneration → 04_AgentWithSkills → 05_HeldOutEvaluation
 #
 # Trigger: databricks bundle run agentops_iterative_improvement -t <target>
 #
@@ -22,7 +22,7 @@ resources:
       tasks:
         - task_key: judge_alignment
           notebook_task:
-            notebook_path: ../src/agent_development/agent_evaluation/notebooks/05_JudgeAlignment.py
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/01_JudgeAlignment.py
             base_parameters:
               agent_name: ${var.agent_name}
               catalog: ${var.catalog}
@@ -39,7 +39,7 @@ resources:
           depends_on:
             - task_key: judge_alignment
           notebook_task:
-            notebook_path: ../src/agent_development/agent_evaluation/notebooks/06_PromptOptimization.py
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/02_PromptOptimization.py
             base_parameters:
               agent_name: ${var.agent_name}
               catalog: ${var.catalog}
@@ -57,7 +57,7 @@ resources:
           depends_on:
             - task_key: prompt_optimization
           notebook_task:
-            notebook_path: ../src/agent_development/agent_evaluation/notebooks/07_SkillGeneration.py
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/03_SkillGeneration.py
             base_parameters:
               agent_name: ${var.agent_name}
               catalog: ${var.catalog}
@@ -74,7 +74,7 @@ resources:
           depends_on:
             - task_key: skill_generation
           notebook_task:
-            notebook_path: ../src/agent_development/agent_evaluation/notebooks/08_AgentWithSkills.py
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/04_AgentWithSkills.py
             base_parameters:
               agent_name: ${var.agent_name}
               catalog: ${var.catalog}
@@ -88,7 +88,7 @@ resources:
           depends_on:
             - task_key: agent_with_skills
           notebook_task:
-            notebook_path: ../src/agent_development/agent_evaluation/notebooks/09_HeldOutEvaluation.py
+            notebook_path: ../src/agent_development/agent_evaluation/notebooks/05_HeldOutEvaluation.py
             base_parameters:
               agent_name: ${var.agent_name}
               catalog: ${var.catalog}
