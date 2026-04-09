@@ -43,7 +43,7 @@ _vol_path = "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/
 if os.path.exists(_vol_path):
     subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _vol_path, "--no-index", "-q"])
 else:
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4", "dspy>=2.6", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------
