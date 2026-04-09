@@ -8,12 +8,20 @@ Flow:
                                          → batch_quarantine table (blocked by guardrails)
 """
 
+import re
 import mlflow
 from databricks.sdk import WorkspaceClient
 import logging
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier (catalog.schema.table) to prevent injection."""
+    if not re.match(r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$', name):
+        raise ValueError(f"Invalid SQL identifier: {name!r}")
+    return name
 
 
 class BatchInferenceRunner:
@@ -65,9 +73,9 @@ class BatchInferenceRunner:
         """
         start = datetime.now(timezone.utc)
 
-        fq_input = f"{self.catalog}.{self.schema}.{input_table}"
-        fq_output = f"{self.catalog}.{self.schema}.{output_table}"
-        fq_quarantine = f"{self.catalog}.{self.schema}.{quarantine_table}"
+        fq_input = _validate_identifier(f"{self.catalog}.{self.schema}.{input_table}")
+        fq_output = _validate_identifier(f"{self.catalog}.{self.schema}.{output_table}")
+        fq_quarantine = _validate_identifier(f"{self.catalog}.{self.schema}.{quarantine_table}")
 
         try:
             # Step 1: Count input records
@@ -85,6 +93,9 @@ class BatchInferenceRunner:
                 }
 
             # Step 2: Run ai_query() on all input records
+            # Validate identifiers to prevent injection (values come from config, not user input)
+            _validate_identifier(query_column)
+            _validate_identifier(self.endpoint_name)
             self._execute_sql(f"""
                 CREATE OR REPLACE TABLE {fq_output} AS
                 SELECT

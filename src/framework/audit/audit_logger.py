@@ -304,6 +304,8 @@ class PipelineStepLogger:
         """Create audit schema + tables if they don't exist.
         Uses ALTER TABLE ADD COLUMN for missing columns (preserves data)."""
         try:
+            _validate_identifier(self.catalog)
+            _validate_identifier(self.audit_schema)
             self._execute(f"CREATE SCHEMA IF NOT EXISTS {self.catalog}.{self.audit_schema}")
             ddls = get_audit_ddls(self.catalog, self.audit_schema)
             for _tname, _ddl in ddls.items():
