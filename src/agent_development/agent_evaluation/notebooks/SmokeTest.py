@@ -218,20 +218,16 @@ import requests, json as _json
 
 # Helper: ChatAgent endpoints return messages[], not choices[]
 def query_agent(endpoint, content):
-    """Query agent endpoint via SDK (handles ChatAgent response format)."""
+    """Query agent endpoint via SDK api_client (handles both response formats)."""
     from databricks.sdk import WorkspaceClient
     w = WorkspaceClient()
-    result = w.serving_endpoints.query(
-        name=endpoint,
-        messages=[{"role": "user", "content": content}],
+    data = w.api_client.do(
+        "POST", f"/serving-endpoints/{endpoint}/invocations",
+        body={"messages": [{"role": "user", "content": content}]},
     )
-    # Convert to dict for consistent access
-    data = result.as_dict() if hasattr(result, 'as_dict') else result
     if isinstance(data, dict):
-        # ChatAgent format: {"messages": [{"role": "assistant", "content": "..."}]}
         if "messages" in data and data["messages"]:
             return data["messages"][0].get("content", "")
-        # Standard format: {"choices": [{"message": {"content": "..."}}]}
         if "choices" in data and data["choices"]:
             return data["choices"][0]["message"]["content"]
     return str(data)[:500]

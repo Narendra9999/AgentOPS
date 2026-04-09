@@ -281,11 +281,10 @@ if endpoint_ready:
     try:
         from databricks.sdk import WorkspaceClient as _SmokeWC
         _smoke_w = _SmokeWC()
-        _smoke_result = _smoke_w.serving_endpoints.query(
-            name=endpoint_name,
-            messages=[{"role": "user", "content": "What is Unity Catalog?"}],
+        _data = _smoke_w.api_client.do(
+            "POST", f"/serving-endpoints/{endpoint_name}/invocations",
+            body={"messages": [{"role": "user", "content": "What is Unity Catalog?"}]},
         )
-        _data = _smoke_result.as_dict() if hasattr(_smoke_result, 'as_dict') else _smoke_result
         if isinstance(_data, dict):
             if "messages" in _data and _data["messages"]:
                 content = _data["messages"][0].get("content", "")
@@ -294,7 +293,7 @@ if endpoint_ready:
             else:
                 content = str(_data)[:200]
         else:
-            content = str(_smoke_result)[:200]
+            content = str(_data)[:200]
         print(f"Smoke test PASSED: {content[:200]}...")
     except Exception as e:
         print(f"Smoke test FAILED: {e}")

@@ -48,11 +48,10 @@ def _build_query_fn(endpoint_name: str):
         for _, row in inputs_df.iterrows():
             query = row["inputs"]
             try:
-                result = w.serving_endpoints.query(
-                    name=endpoint_name,
-                    messages=[{"role": "user", "content": query}],
+                data = w.api_client.do(
+                    "POST", f"/serving-endpoints/{endpoint_name}/invocations",
+                    body={"messages": [{"role": "user", "content": query}]},
                 )
-                data = result.as_dict() if hasattr(result, 'as_dict') else result
                 if isinstance(data, dict):
                     if "messages" in data and data["messages"]:
                         answers.append(data["messages"][0].get("content", ""))
@@ -61,7 +60,7 @@ def _build_query_fn(endpoint_name: str):
                     else:
                         answers.append(str(data)[:500])
                 else:
-                    answers.append(str(result)[:500])
+                    answers.append(str(data)[:500])
             except Exception as e:
                 logger.error(f"Endpoint query failed: {e}")
                 answers.append(f"Error: {e}")
@@ -208,11 +207,10 @@ def run_evaluation(
         for _, row in eval_df.iterrows():
             query = row["inputs"]["query"] if isinstance(row["inputs"], dict) else str(row["inputs"])
             try:
-                result = _eval_w.serving_endpoints.query(
-                    name=model_endpoint,
-                    messages=[{"role": "user", "content": query}],
+                data = _eval_w.api_client.do(
+                    "POST", f"/serving-endpoints/{model_endpoint}/invocations",
+                    body={"messages": [{"role": "user", "content": query}]},
                 )
-                data = result.as_dict() if hasattr(result, 'as_dict') else result
                 if isinstance(data, dict):
                     if "messages" in data and data["messages"]:
                         outputs.append(data["messages"][0].get("content", ""))
@@ -221,7 +219,7 @@ def run_evaluation(
                     else:
                         outputs.append(str(data)[:500])
                 else:
-                    outputs.append(str(result)[:500])
+                    outputs.append(str(data)[:500])
             except Exception as e:
                 logger.error(f"Prediction failed: {e}")
                 outputs.append(f"Error: {e}")
