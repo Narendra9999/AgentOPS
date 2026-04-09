@@ -220,6 +220,54 @@ def _save_turn_to_uc(
         logger.error(f"UC(SQL API) write failed: {e}")
 
 
+# ── UC Delta Read (session history fallback) ──
+
+def _read_history_from_uc(thread_id: str, max_turns: int = 20) -> list[dict]:
+    """Read session history from UC Delta table via SQL Statement API.
+
+    Used as fallback when Lakebase has no history for this thread
+    (e.g., thread was created by Model Serving pipeline, not the App).
+    """
+    if not UC_SESSION_ENABLED:
+        return []
+    wh_id = _resolve_warehouse()
+    if not wh_id:
+        return []
+    try:
+        from databricks.sdk.service.sql import StatementState
+        w = _get_ws()
+        safe_id = thread_id.replace("'", "''")
+        resp = w.statement_execution.execute_statement(
+            warehouse_id=wh_id,
+            statement=f"""
+                SELECT turn_number, user_message, assistant_response
+                FROM {UC_SESSION_TABLE}
+                WHERE session_id = '{safe_id}'
+                ORDER BY turn_number DESC
+                LIMIT {max_turns}
+            """,
+        )
+        state = resp.status.state if resp.status else None
+        if state != StatementState.SUCCEEDED:
+            logger.error(f"UC read failed: state={state}")
+            return []
+        if not resp.result or not resp.result.data_array:
+            return []
+        messages = []
+        for row in reversed(resp.result.data_array):
+            user_msg = row[1] if len(row) > 1 else ""
+            asst_msg = row[2] if len(row) > 2 else ""
+            if user_msg:
+                messages.append({"role": "user", "content": user_msg})
+            if asst_msg:
+                messages.append({"role": "assistant", "content": asst_msg})
+        logger.info(f"UC(SQL API): read {len(resp.result.data_array)} turns for thread {thread_id}")
+        return messages
+    except Exception as e:
+        logger.error(f"UC read failed: {e}")
+        return []
+
+
 # ── Vector Search ──
 @mlflow.trace(name="search_docs", span_type="RETRIEVER")
 def _search_docs(query: str) -> tuple[str, list[dict]]:
@@ -368,16 +416,36 @@ async def run_agent(
         async with AsyncDatabricksStore(**_get_store_kwargs()) as store:
             await store.setup()
 
-            # ── Load session history (short-term) ──
+            # ── Load session history (Lakebase primary → UC fallback) ──
             with mlflow.start_span(name="load_session_history", span_type="RETRIEVER") as span:
+                history_source = "none"
                 try:
                     item = await store.aget(("conversations",), thread_id)
                     prior_messages = item.value.get("messages", []) if item and item.value else []
-                    span.set_attributes({"thread_id": thread_id, "turns_loaded": len(prior_messages)})
+                    if prior_messages:
+                        history_source = "lakebase"
                 except Exception as e:
-                    logger.error(f"Failed to load history: {e}")
+                    logger.error(f"Lakebase history load failed: {e}")
                     prior_messages = []
-                    span.set_attributes({"thread_id": thread_id, "turns_loaded": 0, "error": str(e)})
+
+                # Fallback: read from UC Delta if Lakebase had nothing
+                if not prior_messages and UC_SESSION_ENABLED:
+                    uc_messages = _read_history_from_uc(thread_id)
+                    if uc_messages:
+                        prior_messages = uc_messages
+                        history_source = "uc_delta"
+
+                span.set_inputs({"thread_id": thread_id})
+                span.set_outputs({
+                    "source": history_source,
+                    "turns_loaded": len(prior_messages),
+                    "messages": prior_messages[-10:],  # Last 10 messages for readability
+                })
+                span.set_attributes({
+                    "thread_id": thread_id,
+                    "turns_loaded": len(prior_messages),
+                    "source": history_source,
+                })
 
             if prior_messages:
                 conversation_context = " ".join(
@@ -396,10 +464,15 @@ async def run_agent(
                             {"key": r.key, "content": r.value.get("content", "")}
                             for r in results
                         ]
+                        span.set_inputs({"user_id": user_id, "query": user_message[:100]})
+                        span.set_outputs({
+                            "memories_found": len(recalled_memories),
+                            "memories": recalled_memories,
+                        })
                         span.set_attributes({
                             "user_id": user_id, "query": user_message[:100],
                             "memories_found": len(recalled_memories),
-                            "memories": [m["key"] for m in recalled_memories],
+                            "memory_keys": [m["key"] for m in recalled_memories],
                         })
                         # Enrich conversation_context with recalled memories for intent check
                         if recalled_memories and not conversation_context:
@@ -510,6 +583,11 @@ async def run_agent(
                          "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                          "turn_count": sum(1 for m in updated_messages if m.get("role") == "user")},
                     )
+                    span.set_inputs({"thread_id": thread_id})
+                    span.set_outputs({
+                        "messages_saved": len(updated_messages),
+                        "backends": ["lakebase", "uc_delta"] if UC_SESSION_ENABLED else ["lakebase"],
+                    })
                     span.set_attributes({"thread_id": thread_id, "messages_saved": len(updated_messages)})
                 except Exception as e:
                     logger.error(f"Failed to save history: {e}")

@@ -499,45 +499,29 @@ class SessionStore:
     def _save_to_uc_sql_api(self, record: dict):
         """Write via SQL Statement Execution API (no Spark needed).
 
-        Creates the table if it doesn't exist, then INSERTs the turn record.
-        Works from Model Serving (with declared resources), Databricks Apps,
-        or any SDK-authenticated context.
+        Two strategies:
+          1. CALL stored procedure (works from Model Serving — procedure runs under
+             its own execution context, bypassing system auth MODIFY restriction)
+          2. Direct INSERT (works from Databricks Apps / clusters with MODIFY grant)
+
+        Falls back to direct INSERT if the procedure doesn't exist.
         """
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
 
-            # Ensure table exists (once per session lifetime)
-            if not getattr(self, "_uc_table_ensured", False):
-                self._exec_sql(w, f"""
-                    CREATE TABLE IF NOT EXISTS {self.uc_full_table} (
-                        turn_id STRING NOT NULL,
-                        session_id STRING NOT NULL,
-                        turn_number INT NOT NULL,
-                        user_message STRING,
-                        assistant_response STRING,
-                        request_time STRING NOT NULL,
-                        response_time_ms DOUBLE,
-                        model_endpoint STRING,
-                        trace_id STRING,
-                        metadata STRING
-                    )
-                """)
-                self._uc_table_ensured = True
-
             def esc(s):
                 return str(s).replace("'", "''") if s else ""
 
+            # Strategy 1: CALL stored procedure (preferred — works from Model Serving)
+            proc_name = f"{self.catalog}.{self.schema}.write_session_turn_proc"
             stmt = f"""
-                INSERT INTO {self.uc_full_table}
-                (turn_id, session_id, turn_number, user_message, assistant_response,
-                 request_time, response_time_ms, model_endpoint, trace_id, metadata)
-                VALUES (
+                CALL {proc_name}(
                     '{esc(record["turn_id"])}',
                     '{esc(record["session_id"])}',
                     {record["turn_number"]},
                     '{esc(record.get("user_message", ""))}',
-                    '{esc(record.get("assistant_response", ""))}',
+                    '{esc(record.get("assistant_response", "")[:4000])}',
                     '{esc(record["request_time"])}',
                     {record.get("response_time_ms", 0.0)},
                     '{esc(record.get("model_endpoint", ""))}',

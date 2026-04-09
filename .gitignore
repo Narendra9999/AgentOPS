@@ -17,5 +17,8 @@ build/
 # OS
 .DS_Store
 
+# MLflow local artifacts
+mlruns/
+
 # Scratch — experiments, not deployed
 scratch/
