@@ -52,10 +52,14 @@ def _build_query_fn(endpoint_name: str):
                     name=endpoint_name,
                     messages=[{"role": "user", "content": query}],
                 )
-                if hasattr(result, 'messages') and result.messages:
-                    answers.append(result.messages[0].content if hasattr(result.messages[0], 'content') else str(result.messages[0]))
-                elif hasattr(result, 'choices') and result.choices:
-                    answers.append(result.choices[0].message.content)
+                data = result.as_dict() if hasattr(result, 'as_dict') else result
+                if isinstance(data, dict):
+                    if "messages" in data and data["messages"]:
+                        answers.append(data["messages"][0].get("content", ""))
+                    elif "choices" in data and data["choices"]:
+                        answers.append(data["choices"][0]["message"]["content"])
+                    else:
+                        answers.append(str(data)[:500])
                 else:
                     answers.append(str(result)[:500])
             except Exception as e:
@@ -208,10 +212,14 @@ def run_evaluation(
                     name=model_endpoint,
                     messages=[{"role": "user", "content": query}],
                 )
-                if hasattr(result, 'messages') and result.messages:
-                    outputs.append(result.messages[0].content if hasattr(result.messages[0], 'content') else str(result.messages[0]))
-                elif hasattr(result, 'choices') and result.choices:
-                    outputs.append(result.choices[0].message.content)
+                data = result.as_dict() if hasattr(result, 'as_dict') else result
+                if isinstance(data, dict):
+                    if "messages" in data and data["messages"]:
+                        outputs.append(data["messages"][0].get("content", ""))
+                    elif "choices" in data and data["choices"]:
+                        outputs.append(data["choices"][0]["message"]["content"])
+                    else:
+                        outputs.append(str(data)[:500])
                 else:
                     outputs.append(str(result)[:500])
             except Exception as e:

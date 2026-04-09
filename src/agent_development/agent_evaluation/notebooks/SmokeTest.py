@@ -225,14 +225,16 @@ def query_agent(endpoint, content):
         name=endpoint,
         messages=[{"role": "user", "content": content}],
     )
-    # ChatAgent format
-    if hasattr(result, 'messages') and result.messages:
-        msg = result.messages[0]
-        return msg.content if hasattr(msg, 'content') else msg.get("content", "")
-    # Standard chat format
-    if hasattr(result, 'choices') and result.choices:
-        return result.choices[0].message.content
-    return str(result)
+    # Convert to dict for consistent access
+    data = result.as_dict() if hasattr(result, 'as_dict') else result
+    if isinstance(data, dict):
+        # ChatAgent format: {"messages": [{"role": "assistant", "content": "..."}]}
+        if "messages" in data and data["messages"]:
+            return data["messages"][0].get("content", "")
+        # Standard format: {"choices": [{"message": {"content": "..."}}]}
+        if "choices" in data and data["choices"]:
+            return data["choices"][0]["message"]["content"]
+    return str(data)[:500]
 
 response_text = query_agent(endpoint_name, "What is Delta Lake and how does it work?")
 if isinstance(response_text, list):

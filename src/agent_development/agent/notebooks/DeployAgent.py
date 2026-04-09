@@ -285,10 +285,14 @@ if endpoint_ready:
             name=endpoint_name,
             messages=[{"role": "user", "content": "What is Unity Catalog?"}],
         )
-        if hasattr(_smoke_result, 'messages') and _smoke_result.messages:
-            content = _smoke_result.messages[0].content if hasattr(_smoke_result.messages[0], 'content') else str(_smoke_result.messages[0])
-        elif hasattr(_smoke_result, 'choices') and _smoke_result.choices:
-            content = _smoke_result.choices[0].message.content
+        _data = _smoke_result.as_dict() if hasattr(_smoke_result, 'as_dict') else _smoke_result
+        if isinstance(_data, dict):
+            if "messages" in _data and _data["messages"]:
+                content = _data["messages"][0].get("content", "")
+            elif "choices" in _data and _data["choices"]:
+                content = _data["choices"][0]["message"]["content"]
+            else:
+                content = str(_data)[:200]
         else:
             content = str(_smoke_result)[:200]
         print(f"Smoke test PASSED: {content[:200]}...")
