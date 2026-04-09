@@ -321,14 +321,15 @@ Generate 3-5 skills as a JSON array. Each skill should have:
 - "content": full markdown content with YAML frontmatter (name, description), Tools, Workflow, Quality expectations, Response format sections
 """
 
-    resp = _requests.post(
-        f"{_ws_url}/serving-endpoints/{judge_model}/invocations",
-        headers={"Authorization": f"Bearer {_token}"},
-        json={"messages": [{"role": "user", "content": skill_generation_prompt}], "max_tokens": 4096, "temperature": 0.3},
-        timeout=120,
+    from databricks.sdk import WorkspaceClient as _SkillWC
+    _sw = _SkillWC()
+    _sresult = _sw.serving_endpoints.query(
+        name=judge_model,
+        messages=[{"role": "user", "content": skill_generation_prompt}],
+        max_tokens=4096,
+        temperature=0.3,
     )
-    resp.raise_for_status()
-    generated_skills_text = resp.json()["choices"][0]["message"]["content"]
+    generated_skills_text = _sresult.choices[0].message.content
     print(f"Generated skills via LLM ({len(generated_skills_text)} chars)")
 
 # COMMAND ----------

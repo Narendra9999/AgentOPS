@@ -41,28 +41,23 @@ def load_evaluation_dataset(path_or_table: str, spark=None) -> pd.DataFrame:
 def _build_query_fn(endpoint_name: str):
     """Build a function that calls the serving endpoint for each eval row."""
     def query_iteration(inputs_df):
-        token = os.environ.get("DATABRICKS_TOKEN", "")
-        host = os.environ.get("DATABRICKS_HOST", "")
-        if not host.startswith("http"):
-            host = f"https://{host}"
-        url = f"{host}/serving-endpoints/{endpoint_name}/invocations"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient()
 
         answers = []
         for _, row in inputs_df.iterrows():
             query = row["inputs"]
             try:
-                resp = requests.post(url, headers=headers, json={
-                    "messages": [{"role": "user", "content": query}]
-                })
-                resp.raise_for_status()
-                data = resp.json()
-                if "messages" in data and data["messages"]:
-                    answers.append(data["messages"][0].get("content", ""))
-                elif "choices" in data and data["choices"]:
-                    answers.append(data["choices"][0]["message"]["content"])
+                result = w.serving_endpoints.query(
+                    name=endpoint_name,
+                    messages=[{"role": "user", "content": query}],
+                )
+                if hasattr(result, 'messages') and result.messages:
+                    answers.append(result.messages[0].content if hasattr(result.messages[0], 'content') else str(result.messages[0]))
+                elif hasattr(result, 'choices') and result.choices:
+                    answers.append(result.choices[0].message.content)
                 else:
-                    answers.append(str(data))
+                    answers.append(str(result)[:500])
             except Exception as e:
                 logger.error(f"Endpoint query failed: {e}")
                 answers.append(f"Error: {e}")
@@ -203,27 +198,22 @@ def run_evaluation(
     # Generate predictions from endpoint if provided
     if model_endpoint and "outputs" not in eval_df.columns:
         logger.info(f"Generating predictions from endpoint: {model_endpoint}")
+        from databricks.sdk import WorkspaceClient
+        _eval_w = WorkspaceClient()
         outputs = []
         for _, row in eval_df.iterrows():
             query = row["inputs"]["query"] if isinstance(row["inputs"], dict) else str(row["inputs"])
             try:
-                token = os.environ.get("DATABRICKS_TOKEN", "")
-                host = os.environ.get("DATABRICKS_HOST", "")
-                if not host.startswith("http"):
-                    host = f"https://{host}"
-                resp = requests.post(
-                    f"{host}/serving-endpoints/{model_endpoint}/invocations",
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={"messages": [{"role": "user", "content": query}]},
+                result = _eval_w.serving_endpoints.query(
+                    name=model_endpoint,
+                    messages=[{"role": "user", "content": query}],
                 )
-                resp.raise_for_status()
-                data = resp.json()
-                if "messages" in data and data["messages"]:
-                    outputs.append(data["messages"][0].get("content", ""))
-                elif "choices" in data and data["choices"]:
-                    outputs.append(data["choices"][0]["message"]["content"])
+                if hasattr(result, 'messages') and result.messages:
+                    outputs.append(result.messages[0].content if hasattr(result.messages[0], 'content') else str(result.messages[0]))
+                elif hasattr(result, 'choices') and result.choices:
+                    outputs.append(result.choices[0].message.content)
                 else:
-                    outputs.append(str(data))
+                    outputs.append(str(result)[:500])
             except Exception as e:
                 logger.error(f"Prediction failed: {e}")
                 outputs.append(f"Error: {e}")

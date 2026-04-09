@@ -260,18 +260,17 @@ def endpoint_predict_fn(**kwargs):
     else:
         messages = [{"role": "user", "content": str(inputs)}]
 
-    resp = _requests.post(
-        f"{_ws_url}/serving-endpoints/{chatbot_name}/invocations",
-        headers={"Authorization": f"Bearer {_token}"},
-        json={"messages": messages},
-        timeout=120,
+    from databricks.sdk import WorkspaceClient as _EvalWC
+    _ew = _EvalWC()
+    result = _ew.serving_endpoints.query(
+        name=chatbot_name,
+        messages=messages,
     )
-    resp.raise_for_status()
-    result = resp.json()
-    if "messages" in result:
-        return result["messages"][-1]["content"]
-    elif "choices" in result:
-        return result["choices"][0]["message"]["content"]
+    # Handle both ChatAgent format and standard chat format
+    if hasattr(result, 'messages') and result.messages:
+        return result.messages[-1].content
+    elif hasattr(result, 'choices') and result.choices:
+        return result.choices[0].message.content
     return str(result)[:500]
 
 

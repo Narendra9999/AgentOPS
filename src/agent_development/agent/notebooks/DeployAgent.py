@@ -223,10 +223,9 @@ if not endpoint_ready:
 if endpoint_ready:
     import requests as _req
 
-    _token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-    _host = spark.conf.get("spark.databricks.workspaceUrl", "")
-    if not _host.startswith("http"):
-        _host = f"https://{_host}"
+    # AI Gateway config uses the SDK's api_client for REST calls (no raw token handling)
+    from databricks.sdk import WorkspaceClient as _GwWC
+    _gw_client = _GwWC()
 
     # Apply AI Gateway config incrementally — some features may not be supported
     # on all workspace/endpoint types (e.g., agent endpoints don't support
@@ -237,12 +236,12 @@ if endpoint_ready:
         _gw = {"inference_table_config": {
             "catalog_name": catalog, "schema_name": schema, "enabled": True,
         }}
-        _r = _req.put(f"{_host}/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway",
-            headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}, json=_gw)
-        if _r.ok:
-            print(f"  Inference tables: enabled → {catalog}.{schema}.`{endpoint_name}_payload`")
-        else:
-            print(f"  Inference tables: FAILED ({_r.status_code}) — {_r.json().get('message', '')[:100]}")
+    try:
+        _gw_client.api_client.do("PUT", f"/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway", body=_gw)
+        # api_client.do returns dict on success, raises on error
+        print(f"  Inference tables: enabled → {catalog}.{schema}.`{endpoint_name}_payload`")
+    except Exception as _gw_err:
+        print(f"  Inference tables: FAILED — {_gw_err}")
 
     # Step 2: Try adding rate limits + usage tracking + safety (may fail on some endpoint types)
     _gw_full = {}
@@ -261,16 +260,14 @@ if endpoint_ready:
             "output": {"safety": True, "pii": {"behavior": "BLOCK"}},
         }
 
-    _r = _req.put(f"{_host}/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway",
-        headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}, json=_gw_full)
-    if _r.ok:
+    try:
+        _gw_client.api_client.do("PUT", f"/api/2.0/serving-endpoints/{endpoint_name}/ai-gateway", body=_gw_full)
         print(f"=== AI Gateway fully configured ===")
         print(f"  Rate limits: {rate_limit_user}/user/min, {rate_limit_endpoint}/endpoint/min")
         print(f"  Safety filter: {ai_gateway_safety}")
         print(f"  Usage tracking: {usage_tracking}")
-    else:
-        _msg = _r.json().get("message", "")[:100]
-        print(f"  Advanced AI Gateway features not supported on this endpoint type: {_msg}")
+    except Exception as _gw_err2:
+        print(f"  Advanced AI Gateway features not supported on this endpoint type: {_gw_err2}")
         print(f"  Inference tables are still enabled (applied in step 1)")
 
 # COMMAND ----------
@@ -281,18 +278,19 @@ if endpoint_ready:
 # COMMAND ----------
 
 if endpoint_ready:
-    import requests
     try:
-        _token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-        _host = spark.conf.get("spark.databricks.workspaceUrl", "")
-        if not _host.startswith("http"):
-            _host = f"https://{_host}"
-        _resp = requests.post(f"{_host}/serving-endpoints/{endpoint_name}/invocations",
-            headers={"Authorization": f"Bearer {_token}", "Content-Type": "application/json"},
-            json={"messages": [{"role": "user", "content": "What is Unity Catalog?"}]})
-        _resp.raise_for_status()
-        _data = _resp.json()
-        content = _data["messages"][0]["content"] if "messages" in _data else str(_data)[:200]
+        from databricks.sdk import WorkspaceClient as _SmokeWC
+        _smoke_w = _SmokeWC()
+        _smoke_result = _smoke_w.serving_endpoints.query(
+            name=endpoint_name,
+            messages=[{"role": "user", "content": "What is Unity Catalog?"}],
+        )
+        if hasattr(_smoke_result, 'messages') and _smoke_result.messages:
+            content = _smoke_result.messages[0].content if hasattr(_smoke_result.messages[0], 'content') else str(_smoke_result.messages[0])
+        elif hasattr(_smoke_result, 'choices') and _smoke_result.choices:
+            content = _smoke_result.choices[0].message.content
+        else:
+            content = str(_smoke_result)[:200]
         print(f"Smoke test PASSED: {content[:200]}...")
     except Exception as e:
         print(f"Smoke test FAILED: {e}")
