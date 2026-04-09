@@ -267,11 +267,13 @@ def endpoint_predict_fn(**kwargs):
         messages=messages,
     )
     # Handle both ChatAgent format and standard chat format
-    if hasattr(result, 'messages') and result.messages:
-        return result.messages[-1].content
-    elif hasattr(result, 'choices') and result.choices:
-        return result.choices[0].message.content
-    return str(result)[:500]
+    data = result.as_dict() if hasattr(result, 'as_dict') else result
+    if isinstance(data, dict):
+        if "messages" in data and data["messages"]:
+            return data["messages"][-1].get("content", "")
+        if "choices" in data and data["choices"]:
+            return data["choices"][0]["message"]["content"]
+    return str(data)[:500]
 
 
 def local_predict_fn_factory(system_prompt):

@@ -239,6 +239,12 @@ def predict_fn(**kwargs):
         max_tokens=1024,
         temperature=0.1,
     )
+    data = result.as_dict() if hasattr(result, 'as_dict') else result
+    if isinstance(data, dict):
+        if "choices" in data and data["choices"]:
+            return data["choices"][0]["message"]["content"]
+        if "messages" in data and data["messages"]:
+            return data["messages"][0].get("content", "")
     return result.choices[0].message.content
 
 # Quick test

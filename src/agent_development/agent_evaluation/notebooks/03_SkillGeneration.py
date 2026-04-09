@@ -329,7 +329,11 @@ Generate 3-5 skills as a JSON array. Each skill should have:
         max_tokens=4096,
         temperature=0.3,
     )
-    generated_skills_text = _sresult.choices[0].message.content
+    _sdata = _sresult.as_dict() if hasattr(_sresult, 'as_dict') else _sresult
+    if isinstance(_sdata, dict) and "choices" in _sdata:
+        generated_skills_text = _sdata["choices"][0]["message"]["content"]
+    else:
+        generated_skills_text = _sresult.choices[0].message.content
     print(f"Generated skills via LLM ({len(generated_skills_text)} chars)")
 
 # COMMAND ----------
