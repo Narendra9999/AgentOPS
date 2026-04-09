@@ -218,19 +218,23 @@ import requests, json as _json
 
 # Helper: ChatAgent endpoints return messages[], not choices[]
 def query_agent(endpoint, content):
-    """Query agent endpoint via SDK api_client (handles both response formats)."""
-    from databricks.sdk import WorkspaceClient
-    w = WorkspaceClient()
-    data = w.api_client.do(
-        "POST", f"/serving-endpoints/{endpoint}/invocations",
-        body={"messages": [{"role": "user", "content": content}]},
-    )
-    if isinstance(data, dict):
-        if "messages" in data and data["messages"]:
-            return data["messages"][0].get("content", "")
-        if "choices" in data and data["choices"]:
-            return data["choices"][0]["message"]["content"]
-    return str(data)[:500]
+    """Query agent endpoint via REST API (handles ChatAgent response format)."""
+    token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+    host = spark.conf.get("spark.databricks.workspaceUrl", "")
+    if not host.startswith("http"):
+        host = f"https://{host}"
+    url = f"{host}/serving-endpoints/{endpoint}/invocations"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    resp = requests.post(url, headers=headers, json={"messages": [{"role": "user", "content": content}]})
+    resp.raise_for_status()
+    data = resp.json()
+    # ChatAgent format: {"messages": [{"role": "assistant", "content": "..."}]}
+    if "messages" in data and data["messages"]:
+        return data["messages"][0].get("content", "")
+    # Standard format: {"choices": [{"message": {"content": "..."}}]}
+    if "choices" in data and data["choices"]:
+        return data["choices"][0]["message"]["content"]
+    return str(data)
 
 response_text = query_agent(endpoint_name, "What is Delta Lake and how does it work?")
 if isinstance(response_text, list):

@@ -41,26 +41,28 @@ def load_evaluation_dataset(path_or_table: str, spark=None) -> pd.DataFrame:
 def _build_query_fn(endpoint_name: str):
     """Build a function that calls the serving endpoint for each eval row."""
     def query_iteration(inputs_df):
-        from databricks.sdk import WorkspaceClient
-        w = WorkspaceClient()
+        token = os.environ.get("DATABRICKS_TOKEN", "")
+        host = os.environ.get("DATABRICKS_HOST", "")
+        if not host.startswith("http"):
+            host = f"https://{host}"
+        url = f"{host}/serving-endpoints/{endpoint_name}/invocations"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
         answers = []
         for _, row in inputs_df.iterrows():
             query = row["inputs"]
             try:
-                data = w.api_client.do(
-                    "POST", f"/serving-endpoints/{endpoint_name}/invocations",
-                    body={"messages": [{"role": "user", "content": query}]},
-                )
-                if isinstance(data, dict):
-                    if "messages" in data and data["messages"]:
-                        answers.append(data["messages"][0].get("content", ""))
-                    elif "choices" in data and data["choices"]:
-                        answers.append(data["choices"][0]["message"]["content"])
-                    else:
-                        answers.append(str(data)[:500])
+                resp = requests.post(url, headers=headers, json={
+                    "messages": [{"role": "user", "content": query}]
+                })
+                resp.raise_for_status()
+                data = resp.json()
+                if "messages" in data and data["messages"]:
+                    answers.append(data["messages"][0].get("content", ""))
+                elif "choices" in data and data["choices"]:
+                    answers.append(data["choices"][0]["message"]["content"])
                 else:
-                    answers.append(str(data)[:500])
+                    answers.append(str(data))
             except Exception as e:
                 logger.error(f"Endpoint query failed: {e}")
                 answers.append(f"Error: {e}")
@@ -201,25 +203,27 @@ def run_evaluation(
     # Generate predictions from endpoint if provided
     if model_endpoint and "outputs" not in eval_df.columns:
         logger.info(f"Generating predictions from endpoint: {model_endpoint}")
-        from databricks.sdk import WorkspaceClient
-        _eval_w = WorkspaceClient()
         outputs = []
         for _, row in eval_df.iterrows():
             query = row["inputs"]["query"] if isinstance(row["inputs"], dict) else str(row["inputs"])
             try:
-                data = _eval_w.api_client.do(
-                    "POST", f"/serving-endpoints/{model_endpoint}/invocations",
-                    body={"messages": [{"role": "user", "content": query}]},
+                token = os.environ.get("DATABRICKS_TOKEN", "")
+                host = os.environ.get("DATABRICKS_HOST", "")
+                if not host.startswith("http"):
+                    host = f"https://{host}"
+                resp = requests.post(
+                    f"{host}/serving-endpoints/{model_endpoint}/invocations",
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"messages": [{"role": "user", "content": query}]},
                 )
-                if isinstance(data, dict):
-                    if "messages" in data and data["messages"]:
-                        outputs.append(data["messages"][0].get("content", ""))
-                    elif "choices" in data and data["choices"]:
-                        outputs.append(data["choices"][0]["message"]["content"])
-                    else:
-                        outputs.append(str(data)[:500])
+                resp.raise_for_status()
+                data = resp.json()
+                if "messages" in data and data["messages"]:
+                    outputs.append(data["messages"][0].get("content", ""))
+                elif "choices" in data and data["choices"]:
+                    outputs.append(data["choices"][0]["message"]["content"])
                 else:
-                    outputs.append(str(data)[:500])
+                    outputs.append(str(data))
             except Exception as e:
                 logger.error(f"Prediction failed: {e}")
                 outputs.append(f"Error: {e}")
