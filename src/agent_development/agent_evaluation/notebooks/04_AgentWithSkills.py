@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 04 — Agent with Skills
+# MAGIC # 08 — Agent with Skills
 # MAGIC Extends the base agent with runtime skill loading from UC Volume.
 # MAGIC
 # MAGIC **Prerequisites:**

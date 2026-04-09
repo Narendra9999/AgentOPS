@@ -1,17 +1,17 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 05 — Held-Out Evaluation
+# MAGIC # 09 — Held-Out Evaluation
 # MAGIC Compares agent configurations on the same held-out question set with the aligned judge.
 # MAGIC
 # MAGIC **Configurations compared:**
 # MAGIC 1. **Baseline** — Original agent with config.yaml system prompt
-# MAGIC 2. **Optimized Prompt** — Agent with GEPA-optimized prompt (from 02)
-# MAGIC 3. **Optimized Prompt + Skills** — Agent with optimized prompt + skill files (from 04)
+# MAGIC 2. **Optimized Prompt** — Agent with GEPA-optimized prompt (from 06)
+# MAGIC 3. **Optimized Prompt + Skills** — Agent with optimized prompt + skill files (from 08)
 # MAGIC
 # MAGIC **Prerequisites:**
-# MAGIC - Aligned judge registered (from 01)
-# MAGIC - Optimized prompt in Prompt Registry (from 02)
-# MAGIC - Agent with skills model registered (from 04)
+# MAGIC - Aligned judge registered (from 05)
+# MAGIC - Optimized prompt in Prompt Registry (from 06)
+# MAGIC - Agent with skills model registered (from 08)
 # MAGIC
 # MAGIC **Reference:** Notebook 09-Evaluation from at-bat-assistant
 
@@ -118,7 +118,7 @@ except Exception as e:
         if "/Trash" in exp.name:
             continue
         try:
-            traces = mlflow.search_traces(locations=[exp.experiment_id], max_results=200, return_type="list")
+            traces = mlflow.search_traces(locations=[exp.experiment_id], max_results=500, return_type="list")
             all_traces.extend(traces)
         except Exception:
             pass
@@ -159,39 +159,6 @@ try:
     )
 except Exception:
     pass
-
-# Wrap aligned judge in a @scorer so evaluate() can aggregate metrics.
-# get_scorer() returns a judge whose __call__ output isn't captured by evaluate()
-# as metrics. We wrap it to return a Feedback object that evaluate() understands.
-from mlflow.genai.scorers import scorer
-from mlflow.entities import Feedback
-
-_raw_judge = aligned_judge
-
-@scorer
-def response_quality(inputs, outputs, expectations=None):
-    """Evaluates response quality using the aligned judge."""
-    try:
-        result = _raw_judge(inputs=inputs, outputs=outputs, expectations=expectations)
-        # Convert judge result to Feedback
-        if isinstance(result, Feedback):
-            return result
-        elif isinstance(result, bool):
-            return Feedback(value=result, rationale="Aligned judge assessment")
-        elif isinstance(result, (int, float)):
-            return Feedback(value=float(result), rationale="Aligned judge assessment")
-        elif isinstance(result, str):
-            is_yes = result.strip().lower() in ("yes", "true", "1")
-            return Feedback(value=is_yes, rationale=result)
-        elif hasattr(result, "value"):
-            return Feedback(value=result.value, rationale=getattr(result, "rationale", ""))
-        else:
-            return Feedback(value=str(result), rationale=f"Raw judge output: {type(result).__name__}")
-    except Exception as e:
-        return Feedback(value=False, rationale=f"Judge error: {str(e)[:200]}")
-
-aligned_judge = response_quality
-print(f"Wrapped aligned judge as @scorer 'response_quality' for evaluate() compatibility")
 
 # Load original prompt from config
 nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]
@@ -260,20 +227,19 @@ def endpoint_predict_fn(**kwargs):
     else:
         messages = [{"role": "user", "content": str(inputs)}]
 
-    from databricks.sdk import WorkspaceClient as _EvalWC
-    _ew = _EvalWC()
-    result = _ew.serving_endpoints.query(
-        name=chatbot_name,
-        messages=messages,
+    resp = _requests.post(
+        f"{_ws_url}/serving-endpoints/{chatbot_name}/invocations",
+        headers={"Authorization": f"Bearer {_token}"},
+        json={"messages": messages},
+        timeout=120,
     )
-    # Handle both ChatAgent format and standard chat format
-    data = result.as_dict() if hasattr(result, 'as_dict') else result
-    if isinstance(data, dict):
-        if "messages" in data and data["messages"]:
-            return data["messages"][-1].get("content", "")
-        if "choices" in data and data["choices"]:
-            return data["choices"][0]["message"]["content"]
-    return str(data)[:500]
+    resp.raise_for_status()
+    result = resp.json()
+    if "messages" in result:
+        return result["messages"][-1]["content"]
+    elif "choices" in result:
+        return result["choices"][0]["message"]["content"]
+    return str(result)[:500]
 
 
 def local_predict_fn_factory(system_prompt):

@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 03 — Agent Skill Generation with optimize_anything
+# MAGIC # 07 — Agent Skill Generation with optimize_anything
 # MAGIC Uses GEPA's `optimize_anything` to generate modular skill files from:
 # MAGIC - Tool signatures (vector search, LLM endpoint)
-# MAGIC - Optimized system prompt (from 02)
-# MAGIC - Aligned judge memory (from 01)
+# MAGIC - Optimized system prompt (from 06)
+# MAGIC - Aligned judge memory (from 05)
 # MAGIC - Evaluated traces with expert feedback
 # MAGIC
 # MAGIC **Prerequisites:**
@@ -48,9 +48,9 @@ MAX_METRIC_CALLS = int(dbutils.widgets.get("max_metric_calls"))
 import subprocess, os
 _vol_path = "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs"
 if os.path.exists(_vol_path):
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _vol_path, "--no-index", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "gepa", "--find-links", _vol_path, "--no-index", "-q"])
 else:
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "gepa", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -171,7 +171,7 @@ print(tool_signatures)
 
 eval_traces_list = mlflow.search_traces(
     locations=[EXPERIMENT_ID],
-    max_results=200,
+    max_results=500,
     return_type="list",
 )
 print(f"Loaded {len(eval_traces_list)} traces from experiment")
@@ -321,19 +321,14 @@ Generate 3-5 skills as a JSON array. Each skill should have:
 - "content": full markdown content with YAML frontmatter (name, description), Tools, Workflow, Quality expectations, Response format sections
 """
 
-    from databricks.sdk import WorkspaceClient as _SkillWC
-    _sw = _SkillWC()
-    _sresult = _sw.serving_endpoints.query(
-        name=judge_model,
-        messages=[{"role": "user", "content": skill_generation_prompt}],
-        max_tokens=4096,
-        temperature=0.3,
+    resp = _requests.post(
+        f"{_ws_url}/serving-endpoints/{judge_model}/invocations",
+        headers={"Authorization": f"Bearer {_token}"},
+        json={"messages": [{"role": "user", "content": skill_generation_prompt}], "max_tokens": 4096, "temperature": 0.3},
+        timeout=120,
     )
-    _sdata = _sresult.as_dict() if hasattr(_sresult, 'as_dict') else _sresult
-    if isinstance(_sdata, dict) and "choices" in _sdata:
-        generated_skills_text = _sdata["choices"][0]["message"]["content"]
-    else:
-        generated_skills_text = _sresult.choices[0].message.content
+    resp.raise_for_status()
+    generated_skills_text = resp.json()["choices"][0]["message"]["content"]
     print(f"Generated skills via LLM ({len(generated_skills_text)} chars)")
 
 # COMMAND ----------

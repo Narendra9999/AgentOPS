@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02 — Prompt Optimization with GEPA
+# MAGIC # 06 — Prompt Optimization with GEPA
 # MAGIC Runs GEPA prompt optimization using the aligned judge from notebook 05 as the scorer.
 # MAGIC
 # MAGIC **Prerequisites:**
@@ -230,22 +230,16 @@ def predict_fn(**kwargs):
     else:
         messages.append({"role": "user", "content": str(inputs)})
 
-    # Call via Databricks SDK (handles auth internally, no raw tokens in code)
-    from databricks.sdk import WorkspaceClient
-    w = WorkspaceClient()
-    result = w.serving_endpoints.query(
-        name=judge_model,
-        messages=messages,
-        max_tokens=1024,
-        temperature=0.1,
+    # Call the LLM endpoint directly
+    resp = _requests.post(
+        f"{_ws_url}/serving-endpoints/{judge_model}/invocations",
+        headers={"Authorization": f"Bearer {_token}"},
+        json={"messages": messages, "max_tokens": 1024, "temperature": 0.1},
+        timeout=60,
     )
-    data = result.as_dict() if hasattr(result, 'as_dict') else result
-    if isinstance(data, dict):
-        if "choices" in data and data["choices"]:
-            return data["choices"][0]["message"]["content"]
-        if "messages" in data and data["messages"]:
-            return data["messages"][0].get("content", "")
-    return result.choices[0].message.content
+    resp.raise_for_status()
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
 
 # Quick test
 _test = predict_fn(input=[{"role": "user", "content": "What is Delta Lake?"}])
