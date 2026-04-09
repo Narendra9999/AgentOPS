@@ -269,15 +269,17 @@ class SessionStore:
         return self._read_from_uc_sql_api(session_id, max_turns)
 
     def _read_from_uc_spark(self, spark, session_id: str, max_turns: int) -> list[dict]:
-        """Read via Spark SQL (notebook/cluster context)."""
+        """Read via Spark SQL with parameterized query (notebook/cluster context)."""
         try:
-            df = spark.sql(f"""
-                SELECT turn_number, user_message, assistant_response
-                FROM {self.uc_full_table}
-                WHERE session_id = '{session_id}'
-                ORDER BY turn_number DESC
-                LIMIT {max_turns}
-            """).collect()
+            table = self._validate_identifier(self.uc_full_table)
+            df = spark.sql(
+                f"SELECT turn_number, user_message, assistant_response "
+                f"FROM {table} "
+                f"WHERE session_id = {{sid}} "
+                f"ORDER BY turn_number DESC "
+                f"LIMIT {int(max_turns)}",
+                args={"sid": session_id},
+            ).collect()
 
             messages = []
             for row in reversed(df):
@@ -293,19 +295,22 @@ class SessionStore:
             return []
 
     def _read_from_uc_sql_api(self, session_id: str, max_turns: int) -> list[dict]:
-        """Read via SQL Statement Execution API (no Spark needed)."""
+        """Read via SQL Statement Execution API using parameterized query."""
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
 
-            safe_id = session_id.replace("'", "''")
-            resp = self._exec_sql(w, f"""
-                SELECT turn_number, user_message, assistant_response
-                FROM {self.uc_full_table}
-                WHERE session_id = '{safe_id}'
-                ORDER BY turn_number DESC
-                LIMIT {max_turns}
-            """)
+            table = self._validate_identifier(self.uc_full_table)
+            resp = self._exec_sql(w,
+                f"""SELECT turn_number, user_message, assistant_response
+                    FROM {table}
+                    WHERE session_id = :session_id
+                    ORDER BY turn_number DESC
+                    LIMIT {int(max_turns)}""",
+                parameters=[
+                    {"name": "session_id", "value": session_id, "type": "STRING"},
+                ],
+            )
 
             if not resp.result or not resp.result.data_array:
                 return []
@@ -472,21 +477,34 @@ class SessionStore:
         except Exception as e:
             logger.error(f"UC(Spark) write failed: {e}")
 
-    def _exec_sql(self, w, statement: str) -> object:
-        """Execute a SQL statement via SQL Statement Execution API with proper status checking."""
+    @staticmethod
+    def _validate_identifier(name: str) -> str:
+        """Validate a SQL identifier (catalog, schema, table name) to prevent injection."""
+        import re
+        # Allow only dotted identifiers: catalog.schema.table
+        if not re.match(r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$', name):
+            raise ValueError(f"Invalid SQL identifier: {name!r}")
+        return name
+
+    def _exec_sql(self, w, statement: str, parameters: list = None) -> object:
+        """Execute a SQL statement via SQL Statement Execution API.
+
+        Args:
+            w: WorkspaceClient instance
+            statement: SQL statement (use :name for parameterized values)
+            parameters: List of {"name": ..., "value": ..., "type": ...} dicts
+        """
         from databricks.sdk.service.sql import StatementState
-        from datetime import timedelta
 
         wh_id = self._resolve_warehouse_id()
         if not wh_id:
             raise RuntimeError("No SQL warehouse configured")
 
-        # Omit wait_timeout to use SDK default (synchronous execution).
-        # Explicit values like "30s" or timedelta fail on some SDK versions.
-        resp = w.statement_execution.execute_statement(
-            warehouse_id=wh_id,
-            statement=statement,
-        )
+        kwargs = {"warehouse_id": wh_id, "statement": statement}
+        if parameters:
+            kwargs["parameters"] = parameters
+
+        resp = w.statement_execution.execute_statement(**kwargs)
 
         state = resp.status.state if resp.status else None
         if state != StatementState.SUCCEEDED:
@@ -497,54 +515,55 @@ class SessionStore:
         return resp
 
     def _save_to_uc_sql_api(self, record: dict):
-        """Write via SQL Statement Execution API (no Spark needed).
+        """Write via SQL Statement Execution API using parameterized queries.
 
-        Two strategies:
-          1. CALL stored procedure (works from Model Serving — procedure runs under
-             its own execution context, bypassing system auth MODIFY restriction)
-          2. Direct INSERT (works from Databricks Apps / clusters with MODIFY grant)
-
-        Falls back to direct INSERT if the procedure doesn't exist.
+        Uses :name parameter syntax to prevent SQL injection.
+        Falls back to stored procedure CALL for Model Serving compatibility.
         """
         try:
             from databricks.sdk import WorkspaceClient
             w = WorkspaceClient()
 
-            def esc(s):
-                return str(s).replace("'", "''") if s else ""
+            table = self._validate_identifier(self.uc_full_table)
+            params = [
+                {"name": "turn_id", "value": record["turn_id"], "type": "STRING"},
+                {"name": "session_id", "value": record["session_id"], "type": "STRING"},
+                {"name": "turn_number", "value": str(record["turn_number"]), "type": "INT"},
+                {"name": "user_message", "value": record.get("user_message", "")[:4000], "type": "STRING"},
+                {"name": "assistant_response", "value": record.get("assistant_response", "")[:4000], "type": "STRING"},
+                {"name": "request_time", "value": record["request_time"], "type": "STRING"},
+                {"name": "response_time_ms", "value": str(record.get("response_time_ms", 0.0)), "type": "DOUBLE"},
+                {"name": "model_endpoint", "value": record.get("model_endpoint", ""), "type": "STRING"},
+                {"name": "trace_id", "value": record.get("trace_id", ""), "type": "STRING"},
+                {"name": "metadata", "value": record.get("metadata", ""), "type": "STRING"},
+            ]
 
-            # Strategy 1: CALL stored procedure (preferred — works from Model Serving)
-            proc_name = f"{self.catalog}.{self.schema}.write_session_turn_proc"
-            stmt = f"""
-                CALL {proc_name}(
-                    '{esc(record["turn_id"])}',
-                    '{esc(record["session_id"])}',
-                    {record["turn_number"]},
-                    '{esc(record.get("user_message", ""))}',
-                    '{esc(record.get("assistant_response", "")[:4000])}',
-                    '{esc(record["request_time"])}',
-                    {record.get("response_time_ms", 0.0)},
-                    '{esc(record.get("model_endpoint", ""))}',
-                    '{esc(record.get("trace_id", ""))}',
-                    '{esc(record.get("metadata", ""))}'
-                )
-            """
-            self._exec_sql(w, stmt)
+            # Parameterized INSERT — safe from SQL injection
+            self._exec_sql(w,
+                f"""INSERT INTO {table}
+                    (turn_id, session_id, turn_number, user_message, assistant_response,
+                     request_time, response_time_ms, model_endpoint, trace_id, metadata)
+                    VALUES (:turn_id, :session_id, :turn_number, :user_message, :assistant_response,
+                            :request_time, :response_time_ms, :model_endpoint, :trace_id, :metadata)""",
+                parameters=params,
+            )
 
-            # Verify: read back immediately to confirm data landed
-            safe_sid = record["session_id"].replace("'", "''")
-            verify = self._exec_sql(w, f"""
-                SELECT COUNT(*) as cnt FROM {self.uc_full_table}
-                WHERE session_id = '{safe_sid}' AND turn_id = '{record["turn_id"]}'
-            """)
+            # Verify: read back with parameterized query
+            verify = self._exec_sql(w,
+                f"SELECT COUNT(*) FROM {table} WHERE session_id = :sid AND turn_id = :tid",
+                parameters=[
+                    {"name": "sid", "value": record["session_id"], "type": "STRING"},
+                    {"name": "tid", "value": record["turn_id"], "type": "STRING"},
+                ],
+            )
             rows = verify.result.data_array if verify.result else []
             count = int(rows[0][0]) if rows else 0
             if count > 0:
                 self._uc_last_error = None
-                logger.info(f"UC(SQL API): saved+verified turn session={record['session_id']}, turn={record['turn_number']}")
+                logger.info(f"UC(SQL API): saved+verified session={record['session_id']}, turn={record['turn_number']}")
             else:
-                self._uc_last_error = f"write_unverified: INSERT SUCCEEDED but SELECT found 0 rows"
-                logger.error(f"UC(SQL API): INSERT claimed SUCCEEDED but verification found 0 rows for session={record['session_id']}")
+                self._uc_last_error = "write_unverified: INSERT SUCCEEDED but SELECT found 0 rows"
+                logger.error(f"UC(SQL API): verification failed for session={record['session_id']}")
         except Exception as e:
             self._uc_last_error = f"write: {e}"
             logger.error(f"UC(SQL API) write failed: {e}")

@@ -9,10 +9,18 @@ Tables:
   - guardrail_audit_log: Guardrail block/pass events
 """
 
+import re
 import uuid
 import json
 import logging
 from datetime import datetime, timezone
+
+
+def _validate_identifier(name: str) -> str:
+    """Validate a SQL identifier (catalog.schema.table) to prevent injection."""
+    if not re.match(r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$', name):
+        raise ValueError(f"Invalid SQL identifier: {name!r}")
+    return name
 from databricks.sdk import WorkspaceClient
 
 logger = logging.getLogger(__name__)
@@ -140,7 +148,9 @@ def create_audit_tables(catalog: str, audit_schema: str, warehouse_id: str = Non
         warehouses = list(w.warehouses.list())
         warehouse_id = warehouses[0].id if warehouses else None
 
-    # Create audit schema first
+    # Create audit schema first (validate identifiers to prevent injection)
+    _validate_identifier(catalog)
+    _validate_identifier(audit_schema)
     w.statement_execution.execute_statement(
         warehouse_id=warehouse_id,
         statement=f"CREATE SCHEMA IF NOT EXISTS {catalog}.{audit_schema}",

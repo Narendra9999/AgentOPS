@@ -149,12 +149,36 @@ def _resolve_warehouse() -> str | None:
         return None
 
 
-def _esc_sql(s: str) -> str:
-    """Escape single quotes for SQL string literals."""
-    return str(s).replace("'", "''") if s else ""
+import re as _re
+
+
+def _validate_table_name(name: str) -> str:
+    """Validate a fully-qualified table name to prevent SQL injection."""
+    if not _re.match(r'^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$', name):
+        raise ValueError(f"Invalid table name: {name!r}")
+    return name
 
 
 _uc_table_ensured = False
+
+
+def _exec_uc_sql(statement: str, parameters: list = None):
+    """Execute SQL via Statement Execution API with parameterized query support."""
+    from databricks.sdk.service.sql import StatementState
+
+    wh_id = _resolve_warehouse()
+    if not wh_id:
+        raise RuntimeError("No SQL warehouse available")
+    w = _get_ws()
+    kwargs = {"warehouse_id": wh_id, "statement": statement}
+    if parameters:
+        kwargs["parameters"] = parameters
+    resp = w.statement_execution.execute_statement(**kwargs)
+    state = resp.status.state if resp.status else None
+    if state != StatementState.SUCCEEDED:
+        error_info = getattr(resp.status, 'error', None)
+        raise RuntimeError(f"SQL failed: state={state}, error={error_info}")
+    return resp
 
 
 def _save_turn_to_uc(
@@ -162,58 +186,48 @@ def _save_turn_to_uc(
     assistant_response: str, response_time_ms: float,
     model_endpoint: str = "", trace_id: str = "",
 ):
-    """Append a turn to UC Delta table via SQL Statement Execution API."""
+    """Append a turn to UC Delta table using parameterized SQL (no injection risk)."""
     global _uc_table_ensured
     if not UC_SESSION_ENABLED:
         return
-    wh_id = _resolve_warehouse()
-    if not wh_id:
-        logger.warning("No SQL warehouse — skipping UC audit trail")
-        return
     try:
-        w = _get_ws()
+        table = _validate_table_name(UC_SESSION_TABLE)
 
-        # Ensure table exists (once per app lifetime)
+        # Ensure table exists (once per app lifetime, DDL uses validated identifier)
         if not _uc_table_ensured:
-            w.statement_execution.execute_statement(
-                warehouse_id=wh_id, catalog=CATALOG, schema=SCHEMA,
-                statement=f"""
-                    CREATE TABLE IF NOT EXISTS {UC_SESSION_TABLE} (
-                        turn_id STRING NOT NULL, session_id STRING NOT NULL,
-                        turn_number INT NOT NULL, user_message STRING,
-                        assistant_response STRING, request_time STRING NOT NULL,
-                        response_time_ms DOUBLE, model_endpoint STRING,
-                        trace_id STRING, metadata STRING
-                    )
-                """,
-                # Omit wait_timeout — use SDK default (synchronous)
-            )
+            _exec_uc_sql(f"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                    turn_id STRING NOT NULL, session_id STRING NOT NULL,
+                    turn_number INT NOT NULL, user_message STRING,
+                    assistant_response STRING, request_time STRING NOT NULL,
+                    response_time_ms DOUBLE, model_endpoint STRING,
+                    trace_id STRING, metadata STRING
+                )
+            """)
             _uc_table_ensured = True
 
         turn_id = str(uuid.uuid4())
         request_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-        stmt = f"""
-            INSERT INTO {UC_SESSION_TABLE}
-            (turn_id, session_id, turn_number, user_message, assistant_response,
-             request_time, response_time_ms, model_endpoint, trace_id, metadata)
-            VALUES (
-                '{_esc_sql(turn_id)}',
-                '{_esc_sql(thread_id)}',
-                {turn_number},
-                '{_esc_sql(user_message[:4000])}',
-                '{_esc_sql(assistant_response[:4000])}',
-                '{_esc_sql(request_time)}',
-                {round(response_time_ms, 2)},
-                '{_esc_sql(model_endpoint)}',
-                '{_esc_sql(trace_id)}',
-                ''
-            )
-        """
-        w.statement_execution.execute_statement(
-            warehouse_id=wh_id, catalog=CATALOG, schema=SCHEMA,
-            statement=stmt,
-            # Omit wait_timeout — use SDK default (synchronous)
+        # Parameterized INSERT — safe from SQL injection
+        _exec_uc_sql(
+            f"""INSERT INTO {table}
+                (turn_id, session_id, turn_number, user_message, assistant_response,
+                 request_time, response_time_ms, model_endpoint, trace_id, metadata)
+                VALUES (:turn_id, :session_id, :turn_number, :user_message, :assistant_response,
+                        :request_time, :response_time_ms, :model_endpoint, :trace_id, :metadata)""",
+            parameters=[
+                {"name": "turn_id", "value": turn_id, "type": "STRING"},
+                {"name": "session_id", "value": thread_id, "type": "STRING"},
+                {"name": "turn_number", "value": str(turn_number), "type": "INT"},
+                {"name": "user_message", "value": user_message[:4000], "type": "STRING"},
+                {"name": "assistant_response", "value": assistant_response[:4000], "type": "STRING"},
+                {"name": "request_time", "value": request_time, "type": "STRING"},
+                {"name": "response_time_ms", "value": str(round(response_time_ms, 2)), "type": "DOUBLE"},
+                {"name": "model_endpoint", "value": model_endpoint, "type": "STRING"},
+                {"name": "trace_id", "value": trace_id, "type": "STRING"},
+                {"name": "metadata", "value": "", "type": "STRING"},
+            ],
         )
         logger.info(f"UC(SQL API): saved turn session={thread_id}, turn={turn_number}")
     except Exception as e:
@@ -223,34 +237,24 @@ def _save_turn_to_uc(
 # ── UC Delta Read (session history fallback) ──
 
 def _read_history_from_uc(thread_id: str, max_turns: int = 20) -> list[dict]:
-    """Read session history from UC Delta table via SQL Statement API.
+    """Read session history from UC Delta table using parameterized query.
 
-    Used as fallback when Lakebase has no history for this thread
-    (e.g., thread was created by Model Serving pipeline, not the App).
+    Used as fallback when Lakebase has no history for this thread.
     """
     if not UC_SESSION_ENABLED:
         return []
-    wh_id = _resolve_warehouse()
-    if not wh_id:
-        return []
     try:
-        from databricks.sdk.service.sql import StatementState
-        w = _get_ws()
-        safe_id = thread_id.replace("'", "''")
-        resp = w.statement_execution.execute_statement(
-            warehouse_id=wh_id,
-            statement=f"""
-                SELECT turn_number, user_message, assistant_response
-                FROM {UC_SESSION_TABLE}
-                WHERE session_id = '{safe_id}'
+        table = _validate_table_name(UC_SESSION_TABLE)
+        resp = _exec_uc_sql(
+            f"""SELECT turn_number, user_message, assistant_response
+                FROM {table}
+                WHERE session_id = :session_id
                 ORDER BY turn_number DESC
-                LIMIT {max_turns}
-            """,
+                LIMIT {int(max_turns)}""",
+            parameters=[
+                {"name": "session_id", "value": thread_id, "type": "STRING"},
+            ],
         )
-        state = resp.status.state if resp.status else None
-        if state != StatementState.SUCCEEDED:
-            logger.error(f"UC read failed: state={state}")
-            return []
         if not resp.result or not resp.result.data_array:
             return []
         messages = []
