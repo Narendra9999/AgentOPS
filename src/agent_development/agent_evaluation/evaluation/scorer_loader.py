@@ -325,35 +325,91 @@ def _load_builtin_scorers(config: dict, judge_model: str) -> List:
 
 
 def _load_llm_judge_scorers(config: dict) -> List:
-    """Load custom LLM-as-judge scorers based on config."""
-    from agent_development.agent_evaluation.evaluation.custom_scorers import (
-        accuracy, helpfulness, professionalism, docs_relevance,
-        code_snippet_quality, source_citation, answer_completeness,
-    )
+    """Load custom LLM-as-judge scorers from YAML files or inline config.
 
-    all_scorers = {
-        "accuracy": accuracy,
-        "helpfulness": helpfulness,
-        "professionalism": professionalism,
-        "docs_relevance": docs_relevance,
-        "code_snippet_quality": code_snippet_quality,
-        "source_citation": source_citation,
-        "answer_completeness": answer_completeness,
-    }
+    Looks for scorer definitions in:
+      1. scorers/llm_judge/*.yaml (file-based, preferred)
+      2. config.yaml llm_judge_scorers section (inline, fallback)
+    """
+    import yaml
+    import os
+
+    scorers_dir = os.path.join(os.path.dirname(__file__), "scorers", "llm_judge")
+    scorer_configs = {}
+
+    # Load from YAML files first
+    if os.path.isdir(scorers_dir):
+        for fname in sorted(os.listdir(scorers_dir)):
+            if fname.endswith(".yaml") or fname.endswith(".yml"):
+                fpath = os.path.join(scorers_dir, fname)
+                with open(fpath) as f:
+                    cfg = yaml.safe_load(f) or {}
+                name = cfg.get("name", fname.replace(".yaml", "").replace(".yml", ""))
+                scorer_configs[name] = cfg
+                logger.info(f"  Loaded llm_judge config from file: {fname}")
+
+    # Merge with inline config (inline overrides file-based enabled/weight/threshold)
+    for name, inline_cfg in config.items():
+        if name in scorer_configs:
+            # File exists — inline overrides only enabled/weight/threshold
+            for key in ("enabled", "weight", "threshold"):
+                if key in inline_cfg:
+                    scorer_configs[name][key] = inline_cfg[key]
+        else:
+            # No file — use inline config as-is
+            scorer_configs[name] = inline_cfg
+
+    # Build scorer functions from configs
+    from agent_development.agent_evaluation.evaluation.custom_scorers import _judge_score
+    from mlflow.genai.scorers import scorer as mlflow_scorer
 
     scorers = []
-    for name, scorer_fn in all_scorers.items():
-        scorer_cfg = config.get(name, {})
-        if scorer_cfg.get("enabled", True):
-            scorers.append(scorer_fn)
-            logger.info(f"  Loaded llm_judge: {name} (weight={scorer_cfg.get('weight', 1.0)})")
+    for name, cfg in scorer_configs.items():
+        if not cfg.get("enabled", True):
+            logger.info(f"  Skipped llm_judge (disabled): {name}")
+            continue
+
+        criteria = cfg.get("criteria")
+        rubric = cfg.get("rubric")
+
+        if criteria:
+            # File-based scorer with criteria + rubric
+            def _make_scorer(n, c, r):
+                @mlflow_scorer
+                def file_based_scorer(inputs, outputs, expectations=None):
+                    question = inputs.get("query", str(inputs)) if isinstance(inputs, dict) else str(inputs)
+                    return _judge_score(question, str(outputs or ""), c, rubric=r)
+                file_based_scorer.__name__ = n
+                file_based_scorer.name = n
+                return file_based_scorer
+
+            scorers.append(_make_scorer(name, criteria, rubric))
+        else:
+            # Legacy inline scorer — import by name
+            try:
+                from agent_development.agent_evaluation.evaluation import custom_scorers
+                scorer_fn = getattr(custom_scorers, name, None)
+                if scorer_fn:
+                    scorers.append(scorer_fn)
+                else:
+                    logger.warning(f"  No scorer function found for: {name}")
+                    continue
+            except (ImportError, AttributeError):
+                logger.warning(f"  Could not import scorer: {name}")
+                continue
+
+        logger.info(f"  Loaded llm_judge: {name} (weight={cfg.get('weight', 1.0)})")
 
     return scorers
 
 
 def _load_domain_scorers(config: list, judge_model: str) -> List:
     """
-    Load domain-specific scorers from config.yaml definitions.
+    Load domain-specific scorers from YAML files or inline config.
+
+    Looks for scorer definitions in:
+      1. scorers/domain/*.yaml (file-based, preferred)
+      2. config.yaml domain_scorers list (inline, fallback)
 
     Supports 4 types:
       - guidelines:     LLM evaluates against natural language rules (pass/fail)
@@ -361,10 +417,33 @@ def _load_domain_scorers(config: list, judge_model: str) -> List:
       - keyword:        Fast regex/keyword check, no LLM call (pass/fail)
       - expected_facts: Check if specific facts appear in the response
     """
+    import yaml
+    import os
+
+    scorers_dir = os.path.join(os.path.dirname(__file__), "scorers", "domain")
+    all_configs = []
+
+    # Load from YAML files first
+    file_names = set()
+    if os.path.isdir(scorers_dir):
+        for fname in sorted(os.listdir(scorers_dir)):
+            if fname.endswith(".yaml") or fname.endswith(".yml"):
+                fpath = os.path.join(scorers_dir, fname)
+                with open(fpath) as f:
+                    cfg = yaml.safe_load(f) or {}
+                all_configs.append(cfg)
+                file_names.add(cfg.get("name", ""))
+                logger.info(f"  Loaded domain config from file: {fname}")
+
+    # Add inline configs that aren't already loaded from files
+    for inline_cfg in (config or []):
+        if inline_cfg.get("name") not in file_names:
+            all_configs.append(inline_cfg)
+
     scorers = []
     model_uri = f"databricks:/{judge_model}"
 
-    for domain_cfg in config:
+    for domain_cfg in all_configs:
         if not domain_cfg.get("enabled", True):
             logger.info(f"  Skipped domain scorer (disabled): {domain_cfg.get('name', 'unnamed')}")
             continue

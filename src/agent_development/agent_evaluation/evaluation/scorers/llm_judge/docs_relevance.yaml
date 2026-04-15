@@ -1,0 +1,11 @@
+name: docs_relevance
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Docs relevance: response is grounded in Databricks-specific products, APIs, and terminology."
+rubric: |
+  - 1: Completely generic — could be about any cloud platform, no Databricks-specific content at all
+  - 2: Mentions Databricks once but the actual guidance is generic (e.g., "use a database" instead of "use Unity Catalog")
+  - 3: References some Databricks concepts but mixes in generic advice that could be more specific (e.g., says "use a cluster" without mentioning runtime versions or compute types)
+  - 4: Clearly Databricks-specific — references correct product names (Unity Catalog, Delta Lake, MLflow, etc.) and Databricks-specific patterns
+  - 5: Deeply grounded in Databricks — uses correct product names, API references, Databricks-specific best practices, and distinguishes Databricks features from generic alternatives

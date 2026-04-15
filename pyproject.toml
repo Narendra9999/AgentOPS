@@ -24,7 +24,6 @@ dev = ["pytest>=7.0"]
 optimization = [
     "mlflow[genai]>=3.4",
     "dspy>=2.6",
-    "gepa",
 ]
 
 [tool.setuptools.packages.find]

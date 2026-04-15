@@ -17,7 +17,7 @@ schema: agentops
 
 llm:
   endpoint: databricks-gpt-oss-120b
-  max_tokens: 2048
+  max_tokens: 4096
   temperature: 0.1
   max_history_turns: 10
   max_retrieval_turns: 3
@@ -124,115 +124,19 @@ evaluation:
       enabled: false
 
   # --- LLM-as-Judge Scorers (scorer_mode: llm_judge or all) ---
-  # 7 custom scorers with detailed rubrics, scored 1-5 by the judge model
+  # Scorer definitions loaded from: scorers/llm_judge/*.yaml
+  # Each YAML file defines: name, criteria, rubric, weight, threshold
+  # Override enabled/weight/threshold per-scorer here (optional):
   llm_judge_scorers:
-    accuracy:
-      enabled: true
-      weight: 1.0
-      threshold: null            # null = use global quality_gate_threshold
-    helpfulness:
-      enabled: true
-      weight: 1.0
-      threshold: null
-    professionalism:
-      enabled: true
-      weight: 1.0
-      threshold: null
-    docs_relevance:
-      enabled: true
-      weight: 1.0
-      threshold: null
-    code_snippet_quality:
-      enabled: true
-      weight: 1.0
-      threshold: null
     source_citation:
-      enabled: true
       weight: 0.8               # Lower weight — citation is nice-to-have
-      threshold: null
-    answer_completeness:
-      enabled: true
-      weight: 1.0
-      threshold: null
 
   # --- Domain-Specific Scorers (scorer_mode: domain or all) ---
-  # Define custom scorers specific to your use case. Four types available:
-  #
-  #   guidelines    — LLM evaluates response against natural language rules (pass/fail)
-  #   rubric        — LLM scores response 1-5 against a detailed rubric (like llm_judge but custom criteria)
-  #   keyword       — Fast regex/keyword check, no LLM call (pass/fail)
-  #   expected_facts — Check if specific facts appear in the response (pass/fail)
-  #
-  domain_scorers:
-    # --- Type: guidelines (LLM-based pass/fail) ---
-    - name: databricks_terminology
-      enabled: true
-      type: guidelines
-      weight: 1.0
-      threshold: null            # null = use global quality_gate_threshold
-      rules:
-        - "Must use correct Databricks product names (Unity Catalog, not 'data catalog')"
-        - "Must distinguish between Databricks-specific and generic Spark features"
-        - "Must reference the correct API version (e.g., DataFrame API v2, not deprecated RDD API)"
-
-    - name: security_compliance
-      enabled: true
-      type: guidelines
-      weight: 1.5               # Higher weight — security is critical
-      threshold: 4.0            # Stricter than global threshold for security
-      rules:
-        - "Must not expose internal architecture details or security configurations"
-        - "Must not suggest disabling security features (e.g., 'turn off ACLs')"
-        - "Must recommend least-privilege access patterns"
-
-    # --- Type: rubric (LLM-based 1-5 scoring with custom criteria) ---
-    # Use this when you need numeric scoring on domain-specific quality dimensions
-    # - name: regulatory_awareness
-    #   enabled: true
-    #   type: rubric
-    #   weight: 1.5
-    #   threshold: null
-    #   criteria: "Response demonstrates awareness of data governance and regulatory requirements"
-    #   rubric: |
-    #     - 1: No mention of governance, compliance, or data handling requirements
-    #     - 2: Vague mention of "following best practices" without specifics
-    #     - 3: References governance concepts but does not connect them to the user's context
-    #     - 4: Identifies relevant compliance considerations and recommends appropriate controls
-    #     - 5: Comprehensive governance guidance — identifies regulations, recommends controls, and cites relevant policies
-
-    # --- Type: keyword (fast, no LLM call — regex pattern matching) ---
-    # Use for hard requirements that can be checked by pattern matching
-    # - name: disclaimer_present
-    #   enabled: true
-    #   type: keyword
-    #   weight: 1.0
-    #   threshold: null
-    #   mode: must_contain_any    # must_contain_any, must_contain_all, must_not_contain
-    #   patterns:
-    #     - "(?i)refer to.*official documentation"
-    #     - "(?i)consult.*databricks support"
-    #     - "(?i)see.*docs\\.databricks\\.com"
-
-    # - name: no_competitor_references
-    #   enabled: true
-    #   type: keyword
-    #   weight: 1.0
-    #   threshold: null
-    #   mode: must_not_contain
-    #   patterns:
-    #     - "(?i)snowflake"
-    #     - "(?i)redshift"
-    #     - "(?i)bigquery"
-
-    # --- Type: expected_facts (check for presence of specific facts) ---
-    # Use when certain facts MUST appear in the response for a given query type
-    # Note: facts are checked per-row using the "expected_facts" field in expectations
-    # - name: fact_coverage
-    #   enabled: true
-    #   type: expected_facts
-    #   weight: 1.0
-    #   threshold: null
-    #   min_facts_present: 0.8    # At least 80% of expected facts must appear
+  # Scorer definitions loaded from: scorers/domain/*.yaml
+  # Each YAML file defines: name, type, rules/criteria/patterns, weight, threshold
+  # Add new scorers by creating a YAML file in scorers/domain/
+  # Supported types: guidelines, rubric, keyword, expected_facts
+  domain_scorers: []
 
 guardrails:
   enabled: true
@@ -324,9 +228,9 @@ guardrails:
         - good afternoon
         - what can you
         - who are you
-    allowed_intents:
-      - databricks_query
-      - general_greeting
+    # Intent keywords and allowed_intents are no longer used.
+    # The intent check now uses gibberish detection (see pre_llm.py).
+    # Off-topic questions are handled naturally by the LLM via system prompt.
   post_llm:
     enabled_checks:
       - toxicity

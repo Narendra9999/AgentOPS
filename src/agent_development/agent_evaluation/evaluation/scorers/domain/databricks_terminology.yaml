@@ -1,0 +1,9 @@
+name: databricks_terminology
+enabled: true
+type: guidelines
+weight: 1.0
+threshold: null
+rules:
+  - "Must use correct Databricks product names (Unity Catalog, not 'data catalog')"
+  - "Must distinguish between Databricks-specific and generic Spark features"
+  - "Must reference the correct API version (e.g., DataFrame API v2, not deprecated RDD API)"

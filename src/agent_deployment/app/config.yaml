@@ -322,9 +322,9 @@ guardrails:
         - good afternoon
         - what can you
         - who are you
-    allowed_intents:
-      - databricks_query
-      - general_greeting
+    # Intent keywords and allowed_intents are no longer used.
+    # The intent check now uses gibberish detection (see pre_llm.py).
+    # Off-topic questions are handled naturally by the LLM via system prompt.
   post_llm:
     enabled_checks:
       - toxicity

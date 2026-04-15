@@ -1,0 +1,11 @@
+name: code_snippet_quality
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Code snippet quality: correctness and completeness of code examples. If the question is not about coding, score 5."
+rubric: |
+  - 1: Code is present but has syntax errors, wrong API calls, or would fail to run (e.g., uses a function that doesn't exist)
+  - 2: Code runs but is misleading or uses deprecated patterns (e.g., uses dbutils.fs when Volumes should be used)
+  - 3: Code is correct but incomplete — missing imports, missing context, or only shows a fragment that can't be used directly
+  - 4: Code is correct and mostly complete but could be improved (e.g., missing error handling or missing a common parameter)
+  - 5: Production-ready code example — correct imports, complete, follows best practices, could be copy-pasted and used. Score 5 if the question is conceptual and code is not expected.

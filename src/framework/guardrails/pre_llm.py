@@ -137,45 +137,37 @@ class PreLLMGuardrails:
         return {"blocked": False}
 
     def _check_intent(self, message: str) -> dict:
-        if not self.intent_keywords:
-            return {"blocked": False, "intent": "unconfigured"}
+        """Intent check using a deny-list approach instead of allow-list.
 
-        # Check current message first, then fall back to conversation context.
-        # This allows follow-up messages like "What happens if I set it too low?"
-        # to inherit the intent from prior turns in the session.
-        text_to_check = message.lower()
-        context_text = self._conversation_context.lower() if self._conversation_context else ""
+        Instead of listing every allowed keyword (brittle, blocks legitimate users),
+        we only block messages that are clearly NOT natural language input:
+          - Gibberish / random characters
+          - Extremely short with no words
 
-        for intent_name, keywords in self.intent_keywords.items():
-            if any(kw in text_to_check for kw in keywords):
-                if self.allowed_intents and intent_name not in self.allowed_intents:
-                    return {
-                        "blocked": True,
-                        "intent": intent_name,
-                        "reason": f"Intent '{intent_name}' is not allowed",
-                        "message": "This type of question is outside my scope. Please ask about Databricks products and features.",
-                    }
-                return {"blocked": False, "intent": intent_name}
+        The LLM itself handles off-topic questions gracefully via the system prompt
+        ("I'm a Databricks Documentation Assistant..."). If someone asks about cooking,
+        the LLM will naturally redirect — no need to block at the guardrail level.
+        """
+        text = message.strip()
 
-        # If no intent from current message, check conversation context
-        if context_text:
-            for intent_name, keywords in self.intent_keywords.items():
-                if any(kw in context_text for kw in keywords):
-                    if self.allowed_intents and intent_name not in self.allowed_intents:
-                        return {
-                            "blocked": True,
-                            "intent": intent_name,
-                            "reason": f"Intent '{intent_name}' from conversation context is not allowed",
-                            "message": "This type of question is outside my scope. Please ask about Databricks products and features.",
-                        }
-                    return {"blocked": False, "intent": f"{intent_name}_from_context"}
-
-        if self.allowed_intents:
+        # Block gibberish: messages with very few real words relative to length
+        words = re.findall(r'[a-zA-Z]{2,}', text)
+        if len(text) > 20 and len(words) < 2:
             return {
                 "blocked": True,
-                "intent": "off_topic",
-                "reason": "No matching intent found",
-                "message": "I can only help with Databricks-related questions. Please rephrase your question.",
+                "intent": "gibberish",
+                "reason": f"Message appears to be gibberish ({len(words)} words in {len(text)} chars)",
+                "message": "I couldn't understand your message. Please ask a question in plain language.",
             }
 
-        return {"blocked": False, "intent": "unknown"}
+        # Block messages that are just numbers/symbols with no words
+        alpha_ratio = sum(1 for c in text if c.isalpha()) / max(len(text), 1)
+        if len(text) > 10 and alpha_ratio < 0.3:
+            return {
+                "blocked": True,
+                "intent": "non_text",
+                "reason": f"Message is mostly non-alphabetic ({alpha_ratio:.0%} alpha)",
+                "message": "I couldn't understand your message. Please ask a question in plain language.",
+            }
+
+        return {"blocked": False, "intent": "accepted"}

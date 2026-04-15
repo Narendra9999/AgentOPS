@@ -1,0 +1,11 @@
+name: accuracy
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Accuracy: factual correctness, absence of hallucinations, alignment with official Databricks documentation."
+rubric: |
+  - 1: Contains fabricated facts, wrong API names, or instructions that would cause errors (e.g., says "use spark.read.delta()" which is not a valid API)
+  - 2: Mostly incorrect or seriously misleading, with one or two correct facts mixed in
+  - 3: Partially correct — gets the general concept right but has notable factual errors or outdated information (e.g., describes a deprecated workflow)
+  - 4: Correct on all key facts with minor imprecisions (e.g., omits an optional parameter but core usage is right)
+  - 5: Fully accurate — all facts, API names, parameters, and behaviors match current Databricks documentation

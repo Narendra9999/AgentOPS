@@ -1,0 +1,11 @@
+name: helpfulness
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Helpfulness: practical value, actionable guidance the user can directly apply."
+rubric: |
+  - 1: Generic or irrelevant — does not address the user's actual question (e.g., responds with a Wikipedia-style definition when the user asked "how do I...")
+  - 2: Acknowledges the topic but provides no actionable steps or concrete guidance
+  - 3: Provides some useful information but misses key steps or leaves the user needing to search elsewhere to complete the task
+  - 4: Actionable and covers the main steps, but could be improved with a code example, specific config values, or a recommended approach
+  - 5: Directly actionable — the user can follow the response step-by-step to accomplish their goal, includes code/config when appropriate

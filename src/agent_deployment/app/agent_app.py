@@ -357,7 +357,7 @@ def _call_llm(messages: list[dict], tools: list[dict] = None) -> dict:
     # Build request body — pass messages as plain dicts for tool compatibility
     body = {
         "messages": messages,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "temperature": 0.1,
     }
     if tools:

@@ -1,0 +1,11 @@
+name: source_citation
+enabled: true
+weight: 0.8
+threshold: null
+criteria: "Source citation: references to official documentation or specific source pages."
+rubric: |
+  - 1: No attribution whatsoever — presents information as if generated from general knowledge
+  - 2: Vague attribution like "according to the docs" without specifying which docs
+  - 3: Mentions a product or feature name that implies a source but does not provide a URL or specific doc page reference
+  - 4: References specific documentation pages or sections (e.g., "see the Unity Catalog documentation on privileges") but no URL
+  - 5: Includes explicit source URLs, [Source N] citations, or precise page references that the user can look up directly

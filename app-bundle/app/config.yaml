@@ -1,0 +1,339 @@
+# Agent configuration — all values flow from databricks.yml variables.
+# When running locally/dev, these defaults are used.
+# When running in pipeline, databricks.yml overrides via widget parameters.
+
+agent:
+  name: databricks_docs_agent
+  description: "Databricks Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: mastercard_platform
+    agentops.use_case: databricks_docs
+
+catalog: classic_stable_cykcbe_catalog
+schema: agentops
+
+llm:
+  endpoint: databricks-gpt-oss-120b
+  max_tokens: 2048
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+# Session history persistence — save multi-turn conversations for analytics & replay
+# Both backends can be enabled simultaneously, or either one independently.
+session_history:
+  enabled: true
+
+  # Unity Catalog Delta table — append-only, queryable via SQL/Spark
+  unity_catalog:
+    enabled: true
+    table: session_history           # Stored as {catalog}.{schema}.{table}
+    # Columns auto-created: session_id, turn_number, role, content,
+    #   request_time, response_time_ms, model_endpoint, trace_id
+
+  # Lakebase (via DatabricksStore) — low-latency conversation history + user memory
+  # Uses databricks_langchain.DatabricksStore which handles OAuth credential
+  # generation internally — no raw psycopg2 or connection strings needed.
+  lakebase:
+    enabled: true
+    project: agentops-sessions         # Lakebase Autoscaling project name
+    branch: production                 # Lakebase branch
+
+# Long-term agent memory — cross-session user facts with semantic search
+# Uses the same Lakebase DatabricksStore instance as session_history.lakebase.
+# Stored as namespace ("users", user_id) with semantic search via store.search().
+# Pass user_id in custom_inputs to enable: {"user_id": "user@example.com"}
+long_term_memory:
+  enabled: true
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: databricks_docs_index
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+system_prompt: |
+  You are a Databricks Documentation Assistant. You help users understand:
+  - Databricks products and features (Unity Catalog, Delta Lake, MLflow, etc.)
+  - API usage and SDK integration patterns
+  - Coding best practices on the Databricks platform
+  - Configuration, deployment, and troubleshooting
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Include code snippets when relevant
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Keep responses concise and actionable
+
+evaluation:
+  # Scorer modes — select any combination:
+  #   "builtin"              — MLflow built-in scorers only
+  #   "llm_judge"            — Custom LLM-as-judge scorers only
+  #   "domain"               — Domain-specific scorers only
+  #   "builtin,llm_judge"    — Two groups (comma-separated)
+  #   "builtin,domain"       — Two groups
+  #   "llm_judge,domain"     — Two groups
+  #   "all"                  — All three types combined
+  # Multiple groups run in PARALLEL with individual MLflow trace spans.
+  # Default: "builtin" (safest, no external judge calls needed)
+  scorer_mode: all
+
+  # Quality gate threshold — pipeline blocks deployment if mean scores fall below this
+  quality_gate_threshold: 3.5
+
+  # Judge model for LLM-as-judge scorers (internal FMAPI, no internet needed)
+  judge_model: databricks-meta-llama-3-3-70b-instruct
+
+  # --- MLflow Built-in Scorers (scorer_mode: builtin or all) ---
+  builtin_scorers:
+    # Guidelines: evaluate against natural language criteria
+    guidelines:
+      enabled: true
+      name: response_quality
+      rules:
+        - "The response must directly address the user's question"
+        - "The response must not include fabricated information"
+        - "The response must be concise and well-structured"
+        - "The response must reference Databricks-specific features when applicable"
+
+    # Correctness: compare response to expected answer/facts
+    correctness:
+      enabled: true
+
+    # RelevanceToQuery: check if response addresses the query
+    relevance_to_query:
+      enabled: true
+
+    # Safety: check for harmful content
+    safety:
+      enabled: true
+
+    # RetrievalGroundedness: check if response is grounded in retrieved context
+    # Note: requires RETRIEVER span type in tracing — only works with pre-deployment eval (pyfunc)
+    retrieval_groundedness:
+      enabled: false
+
+  # --- LLM-as-Judge Scorers (scorer_mode: llm_judge or all) ---
+  # 7 custom scorers with detailed rubrics, scored 1-5 by the judge model
+  llm_judge_scorers:
+    accuracy:
+      enabled: true
+      weight: 1.0
+      threshold: null            # null = use global quality_gate_threshold
+    helpfulness:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    professionalism:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    docs_relevance:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    code_snippet_quality:
+      enabled: true
+      weight: 1.0
+      threshold: null
+    source_citation:
+      enabled: true
+      weight: 0.8               # Lower weight — citation is nice-to-have
+      threshold: null
+    answer_completeness:
+      enabled: true
+      weight: 1.0
+      threshold: null
+
+  # --- Domain-Specific Scorers (scorer_mode: domain or all) ---
+  # Define custom scorers specific to your use case. Four types available:
+  #
+  #   guidelines    — LLM evaluates response against natural language rules (pass/fail)
+  #   rubric        — LLM scores response 1-5 against a detailed rubric (like llm_judge but custom criteria)
+  #   keyword       — Fast regex/keyword check, no LLM call (pass/fail)
+  #   expected_facts — Check if specific facts appear in the response (pass/fail)
+  #
+  domain_scorers:
+    # --- Type: guidelines (LLM-based pass/fail) ---
+    - name: databricks_terminology
+      enabled: true
+      type: guidelines
+      weight: 1.0
+      threshold: null            # null = use global quality_gate_threshold
+      rules:
+        - "Must use correct Databricks product names (Unity Catalog, not 'data catalog')"
+        - "Must distinguish between Databricks-specific and generic Spark features"
+        - "Must reference the correct API version (e.g., DataFrame API v2, not deprecated RDD API)"
+
+    - name: security_compliance
+      enabled: true
+      type: guidelines
+      weight: 1.5               # Higher weight — security is critical
+      threshold: 4.0            # Stricter than global threshold for security
+      rules:
+        - "Must not expose internal architecture details or security configurations"
+        - "Must not suggest disabling security features (e.g., 'turn off ACLs')"
+        - "Must recommend least-privilege access patterns"
+
+    # --- Type: rubric (LLM-based 1-5 scoring with custom criteria) ---
+    # Use this when you need numeric scoring on domain-specific quality dimensions
+    # - name: regulatory_awareness
+    #   enabled: true
+    #   type: rubric
+    #   weight: 1.5
+    #   threshold: null
+    #   criteria: "Response demonstrates awareness of data governance and regulatory requirements"
+    #   rubric: |
+    #     - 1: No mention of governance, compliance, or data handling requirements
+    #     - 2: Vague mention of "following best practices" without specifics
+    #     - 3: References governance concepts but does not connect them to the user's context
+    #     - 4: Identifies relevant compliance considerations and recommends appropriate controls
+    #     - 5: Comprehensive governance guidance — identifies regulations, recommends controls, and cites relevant policies
+
+    # --- Type: keyword (fast, no LLM call — regex pattern matching) ---
+    # Use for hard requirements that can be checked by pattern matching
+    # - name: disclaimer_present
+    #   enabled: true
+    #   type: keyword
+    #   weight: 1.0
+    #   threshold: null
+    #   mode: must_contain_any    # must_contain_any, must_contain_all, must_not_contain
+    #   patterns:
+    #     - "(?i)refer to.*official documentation"
+    #     - "(?i)consult.*databricks support"
+    #     - "(?i)see.*docs\\.databricks\\.com"
+
+    # - name: no_competitor_references
+    #   enabled: true
+    #   type: keyword
+    #   weight: 1.0
+    #   threshold: null
+    #   mode: must_not_contain
+    #   patterns:
+    #     - "(?i)snowflake"
+    #     - "(?i)redshift"
+    #     - "(?i)bigquery"
+
+    # --- Type: expected_facts (check for presence of specific facts) ---
+    # Use when certain facts MUST appear in the response for a given query type
+    # Note: facts are checked per-row using the "expected_facts" field in expectations
+    # - name: fact_coverage
+    #   enabled: true
+    #   type: expected_facts
+    #   weight: 1.0
+    #   threshold: null
+    #   min_facts_present: 0.8    # At least 80% of expected facts must appear
+
+guardrails:
+  enabled: true
+  # Note: LLM-based safety is handled by AI Gateway safety filter
+  # on the serving endpoint (ai_gateway_safety_enabled: true in databricks.yml).
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+    domain_context_keywords:
+      - databricks
+      - spark
+      - delta
+      - catalog
+      - unity
+      - mlflow
+      - notebook
+      - cluster
+      - warehouse
+      - pipeline
+      - lakehouse
+      - api
+      - sdk
+      - table
+      - schema
+      - volume
+      - model
+      - endpoint
+      - job
+      - workflow
+      - kill
+      - terminate
+    intent_keywords:
+      databricks_query:
+        - databricks
+        - spark
+        - delta
+        - unity catalog
+        - mlflow
+        - notebook
+        - cluster
+        - warehouse
+        - sql
+        - pipeline
+        - lakehouse
+        - api
+        - sdk
+        - pyspark
+        - dbutils
+        - autoloader
+        - medallion
+        - streaming
+        - serving
+        - endpoint
+        - model
+        - vector search
+        - bundle
+        - dab
+        - job
+        - workflow
+        - volume
+        - schema
+        - catalog
+        - table
+        - python
+        - code
+        - function
+        - how to
+        - how do
+        - what is
+        - create
+        - configure
+        - deploy
+        - error
+        - fix
+        - best practice
+      general_greeting:
+        - hello
+        - hi
+        - hey
+        - help
+        - good morning
+        - good afternoon
+        - what can you
+        - who are you
+    allowed_intents:
+      - databricks_query
+      - general_greeting
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+    min_response_length: 20

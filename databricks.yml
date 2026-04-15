@@ -7,8 +7,8 @@ include:
   - resources/monitoring-resource.yml
   - resources/batch-inference-resource.yml
   - resources/iterative-improvement-resource.yml
-  # Uncomment to deploy as Databricks App with Lakebase memory
-  # (enables session history + long-term user memory via Lakebase Autoscaling)
+  # App deployed separately on Mastercard (TF 1.37 doesn't support databricks_app)
+  # Re-enabled for dev/e2-demo targets
   - resources/app-resource.yml
 
 variables:

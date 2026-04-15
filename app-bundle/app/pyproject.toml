@@ -1,0 +1,14 @@
+[project]
+name = "agentops-docs-app"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "databricks-langchain[memory]",
+    "databricks-ai-bridge",
+    "databricks-sdk",
+    "mlflow",
+    "fastapi",
+    "uvicorn",
+    "pyyaml",
+    "requests",
+]

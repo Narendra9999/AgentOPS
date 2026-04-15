@@ -1,0 +1,11 @@
+name: professionalism
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Professionalism: formal tone, clear structure, appropriate for enterprise technical communication."
+rubric: |
+  - 1: Casual, sloppy, or inappropriate tone (e.g., slang, jokes, emoji, or condescending language)
+  - 2: Inconsistent tone — mixes casual and formal, or uses filler phrases like "basically" or "just do this"
+  - 3: Acceptable tone but lacks structure — reads as a wall of text without clear organization
+  - 4: Professional and well-structured with clear paragraphs or bullet points, minor formatting issues
+  - 5: Polished enterprise-grade response — well-organized with headings/bullets, formal but approachable tone, suitable for sharing with stakeholders

@@ -1,0 +1,11 @@
+name: answer_completeness
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Answer completeness: thorough coverage of the question without deflection or unnecessary brevity."
+rubric: |
+  - 1: Deflects entirely — says "I don't know" or "please refer to the docs" without attempting to answer
+  - 2: Addresses the question superficially with one or two sentences when the topic clearly requires more depth
+  - 3: Covers the main point but misses important aspects (e.g., explains how to create a table but doesn't mention schema, permissions, or data types)
+  - 4: Comprehensive answer that covers the main topic and most related considerations, minor gaps only
+  - 5: Fully complete — addresses the question, covers edge cases or prerequisites, mentions related features the user should know about, and provides next steps if applicable

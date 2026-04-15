@@ -89,6 +89,14 @@ else:
     print(f"Loading docs from local dataset: {_local_path}")
     docs_df = load_data_from_file(spark, _local_path, max_documents=max_docs)
 
+    # Also load AI Dev Kit skills (Databricks best practices, code patterns)
+    _skills_path = os.path.join(_bundle_root, "fixtures", "ai_dev_kit_skills.json")
+    if os.path.exists(_skills_path):
+        print(f"Loading AI Dev Kit skills: {_skills_path}")
+        skills_df = load_data_from_file(spark, _skills_path)
+        docs_df = docs_df.union(skills_df)
+        print(f"Added {skills_df.count()} skill documents (total: {docs_df.count()})")
+
 # COMMAND ----------
 
 # MAGIC %md

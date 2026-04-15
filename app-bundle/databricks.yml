@@ -1,0 +1,81 @@
+bundle:
+  name: agentops-app
+
+resources:
+  experiments:
+    agentops_app_experiment:
+      name: /Users/${workspace.current_user.userName}/agentops-app
+
+  apps:
+    agentops_docs_app:
+      name: agentops-docs-${bundle.target}
+      description: "AgentOPS Docs Chatbot with Lakebase memory"
+      source_code_path: ./app/
+
+      config:
+        env:
+          - name: SERVING_ENDPOINT_NAME
+            value: ${var.llm_endpoint}
+          - name: CATALOG_NAME
+            value: ${var.catalog}
+          - name: SCHEMA_NAME
+            value: ${var.schema}
+          - name: LAKEBASE_AUTOSCALING_PROJECT
+            value: agentops-sessions
+          - name: LAKEBASE_AUTOSCALING_BRANCH
+            value: production
+          - name: VS_INDEX
+            value: ${var.catalog}.${var.schema}.${var.vs_index}
+          - name: VS_NUM_RESULTS
+            value: "5"
+          - name: UC_SESSION_ENABLED
+            value: "true"
+          - name: UC_SESSION_TABLE
+            value: ${var.catalog}.${var.schema}.session_history
+          - name: SQL_WAREHOUSE_ID
+            value: ${var.sql_warehouse_id}
+          - name: EMBEDDING_ENDPOINT
+            value: ${var.embedding_model}
+          - name: MLFLOW_EXPERIMENT_ID
+            value: ${resources.experiments.agentops_app_experiment.id}
+
+      resources:
+        - name: serving-endpoint
+          serving_endpoint:
+            name: ${var.llm_endpoint}
+            permission: CAN_QUERY
+
+        - name: app-packages
+          volume:
+            catalog: mc_edacde_shared
+            schema: datalake_shared
+            volume: libraries
+            permission: CAN_READ
+
+variables:
+  catalog:
+    description: Unity Catalog name
+    default: mc_edacde
+  schema:
+    description: Schema name
+    default: agentops
+  llm_endpoint:
+    description: LLM serving endpoint name
+    default: databricks-gpt-oss-120b
+  embedding_model:
+    description: Embedding model endpoint
+    default: databricks-gte-large-en
+  vs_index:
+    description: Vector search index name
+    default: databricks_docs_index
+  sql_warehouse_id:
+    description: SQL warehouse ID for UC session writes
+    default: "78563e1df52edcf3"
+
+targets:
+  mastercard:
+    mode: development
+    default: true
+    workspace:
+      host: https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
+      profile: mastercard
