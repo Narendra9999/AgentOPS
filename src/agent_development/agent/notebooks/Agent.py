@@ -46,7 +46,8 @@ class DatabricksDocsAgent(AgentOPSBase):
         self.temperature = config["llm"].get("temperature", 0.1)
         self.max_history_turns = config["llm"].get("max_history_turns", 10)
         self.max_retrieval_turns = config["llm"].get("max_retrieval_turns", 3)
-        self.system_prompt = config.get("system_prompt", "")
+        # Load system prompt: MLflow Prompt Registry → config.yaml fallback
+        self.system_prompt = self._load_system_prompt(config)
 
         # Vector search — fully qualified index name from config
         vs_config = config.get("vector_search", {})
@@ -62,6 +63,25 @@ class DatabricksDocsAgent(AgentOPSBase):
 
         self.vs_num_results = vs_config.get("num_results", 5)
         self.vs_columns = vs_config.get("columns", ["chunk_text", "url", "chunk_id"])
+
+    def _load_system_prompt(self, config: dict) -> str:
+        """Load system prompt from MLflow Prompt Registry, fall back to config.yaml.
+
+        The prompt is registered during the pipeline's RegisterModel step and
+        can be versioned, A/B tested, and updated without redeploying the model.
+        """
+        catalog = config.get("catalog", "")
+        schema = config.get("schema", "")
+        agent_name = config.get("agent", {}).get("name", "")
+        prompt_name = f"{catalog}.{schema}.{agent_name}_system_prompt"
+
+        try:
+            prompt = mlflow.genai.load_prompt(f"prompts:/{prompt_name}@production")
+            logger.info(f"Loaded prompt from registry: {prompt_name}@production (v{prompt.version})")
+            return prompt.template
+        except Exception as e:
+            logger.info(f"Prompt registry unavailable ({e}), using config.yaml")
+            return config.get("system_prompt", "")
 
     @mlflow.trace(span_type="RETRIEVER")
     def _retrieve_context(self, query: str) -> tuple[str, list[dict]]:

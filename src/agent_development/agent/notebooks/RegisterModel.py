@@ -262,6 +262,40 @@ except Exception:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 4b. Register system prompt in MLflow Prompt Registry
+
+# COMMAND ----------
+
+# Register the system prompt so it can be versioned, tracked, and loaded at runtime
+_prompt_name = f"{catalog}.{schema}.{agent_name}_system_prompt"
+_system_prompt = _agent_config.get("system_prompt", "")
+
+try:
+    prompt_version = mlflow.genai.register_prompt(
+        name=_prompt_name,
+        template=_system_prompt,
+        commit_message=f"Registered with model v{uc_model.version}",
+        tags={
+            "model_version": str(uc_model.version),
+            "llm_endpoint": _agent_config["llm"]["endpoint"],
+        },
+    )
+    print(f"Prompt registered: {_prompt_name} v{prompt_version.version}")
+
+    # Set production alias
+    mlflow.genai.set_prompt_alias(
+        name=_prompt_name,
+        alias="production",
+        version=prompt_version.version,
+    )
+    print(f"Prompt alias set: {_prompt_name}@production → v{prompt_version.version}")
+except Exception as e:
+    # Prompt registry may not be available in all environments
+    print(f"Prompt registration skipped: {e}")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 5. Complete audit tracking
 
 # COMMAND ----------

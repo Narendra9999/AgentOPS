@@ -393,6 +393,14 @@ new_prompt = mlflow.genai.register_prompt(
 print(f"\nRegistered optimized prompt: {PROMPT_NAME} (version {new_prompt.version})")
 print(f"First 300 chars:\n{best_prompt_text[:300]}...")
 
+# Update production alias to point to the optimized prompt
+mlflow.genai.set_prompt_alias(
+    name=PROMPT_NAME,
+    alias="production",
+    version=new_prompt.version,
+)
+print(f"Updated @production alias → v{new_prompt.version}")
+
 # COMMAND ----------
 
 # MAGIC %md

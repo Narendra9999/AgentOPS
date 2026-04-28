@@ -59,7 +59,15 @@ if os.path.exists(_config_path):
     with open(_config_path) as f:
         _config = yaml.safe_load(f) or {}
 
-_base_prompt = _config.get("system_prompt", """You are a Databricks Documentation Assistant. You help users understand Databricks products, APIs, and best practices. Base your answers on the provided documentation context. Cite sources when referencing specific docs.""")
+# Load system prompt: MLflow Prompt Registry → config.yaml fallback
+_prompt_name = f"{CATALOG}.{SCHEMA}.databricks_docs_agent_system_prompt"
+try:
+    _prompt_obj = mlflow.genai.load_prompt(f"prompts:/{_prompt_name}@production")
+    _base_prompt = _prompt_obj.template
+    logger.info(f"Loaded prompt from registry: {_prompt_name}@production (v{_prompt_obj.version})")
+except Exception as e:
+    _base_prompt = _config.get("system_prompt", """You are a Databricks Documentation Assistant. You help users understand Databricks products, APIs, and best practices. Base your answers on the provided documentation context. Cite sources when referencing specific docs.""")
+    logger.info(f"Prompt registry unavailable ({e}), using config.yaml")
 
 MEMORY_PROMPT = """
 You have long-term memory tools. Use them SILENTLY to personalize responses:
