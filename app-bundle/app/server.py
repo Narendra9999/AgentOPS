@@ -13,7 +13,15 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from agent_app import run_agent
+_import_error = None
+_import_traceback = None
+try:
+    from agent_app import run_agent
+except Exception as e:
+    _import_error = str(e)
+    import traceback as _tb
+    _import_traceback = _tb.format_exc()
+    run_agent = None
 
 app = FastAPI(title="AgentOPS Docs Chatbot", version="1.0.0")
 
@@ -33,6 +41,30 @@ class ChatRequest(BaseModel):
 async def root():
     """Serve the chat UI."""
     return CHAT_UI.read_text()
+
+
+@app.get("/status")
+async def status():
+    """Show app status including any import errors."""
+    import os
+    return {
+        "agent_loaded": run_agent is not None,
+        "import_error": _import_error,
+        "import_traceback": _import_traceback,
+        "env": {k: os.getenv(k, "NOT SET") for k in [
+            "SERVING_ENDPOINT_NAME", "CATALOG_NAME", "SCHEMA_NAME",
+            "VS_INDEX", "LAKEBASE_AUTOSCALING_PROJECT", "MLFLOW_EXPERIMENT_ID",
+        ]},
+    }
+
+
+@app.get("/packages")
+async def packages():
+    """List all installed packages."""
+    import subprocess
+    result = subprocess.run(["pip", "freeze"], capture_output=True, text=True)
+    pkgs = [line for line in result.stdout.strip().split("\n") if line]
+    return {"total": len(pkgs), "packages": pkgs}
 
 
 @app.get("/health")
@@ -58,6 +90,12 @@ async def invocations(request: ChatRequest):
     if request.custom_inputs:
         thread_id = thread_id or request.custom_inputs.get("thread_id")
         user_id = user_id or request.custom_inputs.get("user_id")
+
+    if run_agent is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"Agent not loaded: {_import_error}"},
+        )
 
     try:
         result = await run_agent(

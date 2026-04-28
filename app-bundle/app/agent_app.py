@@ -59,7 +59,15 @@ if os.path.exists(_config_path):
     with open(_config_path) as f:
         _config = yaml.safe_load(f) or {}
 
-_base_prompt = _config.get("system_prompt", """You are a Databricks Documentation Assistant. You help users understand Databricks products, APIs, and best practices. Base your answers on the provided documentation context. Cite sources when referencing specific docs.""")
+# Load system prompt: MLflow Prompt Registry → config.yaml fallback
+_prompt_name = f"{CATALOG}.{SCHEMA}.databricks_docs_agent_system_prompt"
+try:
+    _prompt_obj = mlflow.genai.load_prompt(f"prompts:/{_prompt_name}@production")
+    _base_prompt = _prompt_obj.template
+    logger.info(f"Loaded prompt from registry: {_prompt_name}@production (v{_prompt_obj.version})")
+except Exception as e:
+    _base_prompt = _config.get("system_prompt", """You are a Databricks Documentation Assistant. You help users understand Databricks products, APIs, and best practices. Base your answers on the provided documentation context. Cite sources when referencing specific docs.""")
+    logger.info(f"Prompt registry unavailable ({e}), using config.yaml")
 
 MEMORY_PROMPT = """
 You have long-term memory tools. Use them SILENTLY to personalize responses:
@@ -357,7 +365,7 @@ def _call_llm(messages: list[dict], tools: list[dict] = None) -> dict:
     # Build request body — pass messages as plain dicts for tool compatibility
     body = {
         "messages": messages,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "temperature": 0.1,
     }
     if tools:
@@ -417,20 +425,32 @@ async def run_agent(
     with mlflow.start_span(name="agentops_predict", span_type="AGENT") as root_span:
         root_span.set_inputs({"messages": messages, "thread_id": thread_id, "user_id": user_id or ""})
 
-        async with AsyncDatabricksStore(**_get_store_kwargs()) as store:
+        # Try Lakebase store — gracefully degrade if unavailable
+        _store_available = False
+        store = None
+        try:
+            store = AsyncDatabricksStore(**_get_store_kwargs())
+            await store.__aenter__()
             await store.setup()
+            _store_available = True
+        except Exception as e:
+            logger.warning(f"Lakebase unavailable, running without memory: {e}")
+            store = None
+
+        try:
 
             # ── Load session history (Lakebase primary → UC fallback) ──
             with mlflow.start_span(name="load_session_history", span_type="RETRIEVER") as span:
                 history_source = "none"
-                try:
-                    item = await store.aget(("conversations",), thread_id)
-                    prior_messages = item.value.get("messages", []) if item and item.value else []
-                    if prior_messages:
-                        history_source = "lakebase"
-                except Exception as e:
-                    logger.error(f"Lakebase history load failed: {e}")
-                    prior_messages = []
+                if _store_available and store:
+                    try:
+                        item = await store.aget(("conversations",), thread_id)
+                        prior_messages = item.value.get("messages", []) if item and item.value else []
+                        if prior_messages:
+                            history_source = "lakebase"
+                    except Exception as e:
+                        logger.error(f"Lakebase history load failed: {e}")
+                        prior_messages = []
 
                 # Fallback: read from UC Delta if Lakebase had nothing
                 if not prior_messages and UC_SESSION_ENABLED:
@@ -460,7 +480,7 @@ async def run_agent(
 
             # ── Recall long-term user memories ──
             # Done BEFORE guardrails so recalled context can inform intent check
-            if user_id:
+            if user_id and _store_available and store:
                 with mlflow.start_span(name="recall_user_memory", span_type="RETRIEVER") as span:
                     try:
                         results = await store.asearch(("users", safe_user_id), query=user_message, limit=5)
@@ -516,7 +536,7 @@ async def run_agent(
             # ── Call LLM with tool loop ──
             # The LLM can call save_memory/recall_memories tools.
             # We execute tool calls and loop until the LLM produces a final text response.
-            use_tools = MEMORY_TOOLS if user_id else None
+            use_tools = MEMORY_TOOLS if (user_id and _store_available) else None
             max_tool_rounds = 3
             for _round in range(max_tool_rounds + 1):
                 llm_result = _call_llm(augmented, tools=use_tools)
@@ -576,7 +596,8 @@ async def run_agent(
                     response_text = post_result.get("message", "Response filtered for safety.")
 
             # ── Save session history ──
-            with mlflow.start_span(name="save_session_history", span_type="TOOL") as span:
+            if _store_available and store:
+              with mlflow.start_span(name="save_session_history", span_type="TOOL") as span:
                 try:
                     updated_messages = list(all_messages) + [
                         {"role": "assistant", "content": response_text}
@@ -599,7 +620,7 @@ async def run_agent(
 
             # ── Save conversation summary to long-term memory ──
             # So users can ask "recap last conversation" on a new thread
-            if user_id and safe_user_id:
+            if user_id and safe_user_id and _store_available and store:
                 try:
                     user_turns = [m["content"] for m in all_messages if m.get("role") == "user"]
                     last_topics = user_turns[-5:]  # last 5 user messages as summary
@@ -631,6 +652,14 @@ async def run_agent(
                     )
                 except Exception as e:
                     logger.warning(f"UC audit trail write failed: {e}")
+
+        finally:
+            # Clean up Lakebase store if it was opened
+            if store:
+                try:
+                    await store.__aexit__(None, None, None)
+                except Exception:
+                    pass
 
         latency_ms = (time.time() - start_time) * 1000
         root_span.set_attributes({

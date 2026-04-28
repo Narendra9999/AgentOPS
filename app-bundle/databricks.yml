@@ -4,11 +4,11 @@ bundle:
 resources:
   experiments:
     agentops_app_experiment:
-      name: /Users/${workspace.current_user.userName}/agentops-app
+      name: /Users/${workspace.current_user.userName}/agentops-app-standalone
 
   apps:
     agentops_docs_app:
-      name: agentops-docs-${bundle.target}
+      name: agentops-app-${bundle.target}
       description: "AgentOPS Docs Chatbot with Lakebase memory"
       source_code_path: ./app/
 
@@ -45,17 +45,15 @@ resources:
             name: ${var.llm_endpoint}
             permission: CAN_QUERY
 
-        - name: app-packages
-          volume:
-            catalog: mc_edacde_shared
-            schema: datalake_shared
-            volume: libraries
-            permission: CAN_READ
+        - name: app-experiment
+          experiment:
+            experiment_id: ${resources.experiments.agentops_app_experiment.id}
+            permission: CAN_EDIT
 
 variables:
   catalog:
     description: Unity Catalog name
-    default: mc_edacde
+    default: classic_stable_cykcbe_catalog
   schema:
     description: Schema name
     default: agentops
@@ -70,12 +68,20 @@ variables:
     default: databricks_docs_index
   sql_warehouse_id:
     description: SQL warehouse ID for UC session writes
-    default: "78563e1df52edcf3"
+    default: "3c623898df7d3c96"
 
 targets:
-  mastercard:
+  dev:
     mode: development
     default: true
     workspace:
+      host: https://fevm-classic-stable-cykcbe.cloud.databricks.com
+
+  mastercard:
+    mode: development
+    workspace:
       host: https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
       profile: mastercard
+    variables:
+      catalog: mc_edacde
+      sql_warehouse_id: "78563e1df52edcf3"

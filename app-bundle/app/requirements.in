@@ -1,0 +1,14 @@
+# Top-level app dependencies — used as input to generate requirements-frozen.txt
+# Regenerate frozen file:
+#   uv pip compile app-bundle/app/requirements.in \
+#     --python-version 3.11 --python-platform linux \
+#     --index-url https://pypi-proxy.dev.databricks.com/simple \
+#     --output-file app-bundle/app/requirements-frozen.txt
+databricks-langchain
+databricks-ai-bridge
+databricks-sdk
+mlflow==3.10.1
+fastapi
+uvicorn
+pyyaml
+requests
