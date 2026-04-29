@@ -1,5 +1,10 @@
 # Complete app dependencies — wheels from UC Volume (Python 3.11)
 # 4 packages pre-installed in container: databricks-sql-connector, filelock, fsspec, langchain-protocol
+# Memory extra packages (Lakebase connectivity)
+/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/langgraph_checkpoint_postgres-3.0.5-py3-none-any.whl
+/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/psycopg-3.3.3-py3-none-any.whl
+/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/psycopg_binary-3.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/psycopg_pool-3.3.0-py3-none-any.whl
 /Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/aiofiles-23.2.1-py3-none-any.whl
 /Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/aiohappyeyeballs-2.6.1-py3-none-any.whl
 /Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels/aiohttp-3.13.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl

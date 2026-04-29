@@ -172,7 +172,7 @@ _uc_table_ensured = False
 
 def _exec_uc_sql(statement: str, parameters: list = None):
     """Execute SQL via Statement Execution API with parameterized query support."""
-    from databricks.sdk.service.sql import StatementState
+    from databricks.sdk.service.sql import StatementState, StatementParameterListItem
 
     wh_id = _resolve_warehouse()
     if not wh_id:
@@ -180,7 +180,11 @@ def _exec_uc_sql(statement: str, parameters: list = None):
     w = _get_ws()
     kwargs = {"warehouse_id": wh_id, "statement": statement}
     if parameters:
-        kwargs["parameters"] = parameters
+        # Convert dicts to StatementParameterListItem objects for newer SDK versions
+        kwargs["parameters"] = [
+            StatementParameterListItem(**p) if isinstance(p, dict) else p
+            for p in parameters
+        ]
     resp = w.statement_execution.execute_statement(**kwargs)
     state = resp.status.state if resp.status else None
     if state != StatementState.SUCCEEDED:
