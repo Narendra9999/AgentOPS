@@ -297,7 +297,6 @@ def _read_history_from_uc(thread_id: str, max_turns: int = 20) -> list[dict]:
 
 
 # ── Vector Search ──
-@mlflow.trace(name="search_docs", span_type="RETRIEVER")
 def _search_docs(query: str) -> tuple[str, list[dict]]:
     """Retrieve relevant docs via vector search (SDK-based)."""
     try:
@@ -369,7 +368,6 @@ MEMORY_TOOLS = [
 
 
 # ── LLM Call (with tool support) ──
-@mlflow.trace(name="call_llm", span_type="LLM")
 def _call_llm(messages: list[dict], tools: list[dict] = None) -> dict:
     """Call the LLM endpoint. Returns {"content": str, "tool_calls": list|None}.
 
@@ -570,16 +568,22 @@ async def run_agent(
 
             # ── Pre-LLM Guardrails ──
             if GUARDRAILS_ENABLED and _pre_guardrails:
-                pre_result = _pre_guardrails.check(
-                    user_message, conversation_context=conversation_context)
-                if pre_result.get("blocked"):
-                    return {"output": pre_result.get("message", "Request blocked."),
-                            "thread_id": thread_id, "user_id": user_id or ""}
+                with mlflow.start_span(name="pre_llm_guardrails", span_type="GUARDRAIL") as span:
+                    pre_result = _pre_guardrails.check(
+                        user_message, conversation_context=conversation_context)
+                    span.set_inputs({"message": user_message[:200]})
+                    span.set_outputs(pre_result)
+                    if pre_result.get("blocked"):
+                        return {"output": pre_result.get("message", "Request blocked."),
+                                "thread_id": thread_id, "user_id": user_id or ""}
 
             # ── Retrieve docs (vector search) ──
-            recent_user_msgs = [m["content"] for m in all_messages if m.get("role") == "user"][-3:]
-            retrieval_query = " ".join(recent_user_msgs)
-            context_text, retrieved_docs = _search_docs(retrieval_query)
+            with mlflow.start_span(name="search_docs", span_type="RETRIEVER") as span:
+                recent_user_msgs = [m["content"] for m in all_messages if m.get("role") == "user"][-3:]
+                retrieval_query = " ".join(recent_user_msgs)
+                context_text, retrieved_docs = _search_docs(retrieval_query)
+                span.set_inputs({"query": retrieval_query[:200], "num_results": VS_NUM_RESULTS})
+                span.set_outputs({"docs_found": len(retrieved_docs), "docs": retrieved_docs})
 
             # ── Build augmented prompt ──
             augmented = [
@@ -600,7 +604,10 @@ async def run_agent(
             use_tools = MEMORY_TOOLS if (user_id and _store_available) else None
             max_tool_rounds = 3
             for _round in range(max_tool_rounds + 1):
-                llm_result = _call_llm(augmented, tools=use_tools)
+                with mlflow.start_span(name=f"call_llm_round_{_round}", span_type="LLM") as llm_span:
+                    llm_span.set_inputs({"messages_count": len(augmented), "tools": bool(use_tools), "round": _round})
+                    llm_result = _call_llm(augmented, tools=use_tools)
+                    llm_span.set_outputs({"content_length": len(llm_result.get("content", "")), "has_tool_calls": bool(llm_result.get("tool_calls"))})
                 tool_calls = llm_result.get("tool_calls")
 
                 if not tool_calls:
@@ -650,9 +657,12 @@ async def run_agent(
 
             # ── Post-LLM Guardrails ──
             if GUARDRAILS_ENABLED and _post_guardrails:
+              with mlflow.start_span(name="post_llm_guardrails", span_type="GUARDRAIL") as span:
                 post_result = _post_guardrails.check(
                     user_message, response_text,
                     {"retrieved_docs": retrieved_docs, "user_id": user_id or ""})
+                span.set_inputs({"response_length": len(response_text)})
+                span.set_outputs(post_result)
                 if post_result.get("blocked"):
                     response_text = post_result.get("message", "Response filtered for safety.")
 
@@ -775,24 +785,31 @@ async def run_agent_stream(
         store = None
 
     try:
+      with mlflow.start_span(name="agentops_predict_stream", span_type="AGENT") as root_span:
+        root_span.set_inputs({"messages": messages, "thread_id": thread_id, "user_id": user_id or "", "streaming": True})
+
         # Load session history
-        if _store_available and store:
-            try:
-                item = await store.aget(("conversations",), thread_id)
-                prior_messages = item.value.get("messages", []) if item and item.value else []
-            except Exception:
-                prior_messages = []
+        with mlflow.start_span(name="load_session_history", span_type="RETRIEVER") as span:
+            if _store_available and store:
+                try:
+                    item = await store.aget(("conversations",), thread_id)
+                    prior_messages = item.value.get("messages", []) if item and item.value else []
+                except Exception:
+                    prior_messages = []
+            span.set_outputs({"turns_loaded": len(prior_messages), "source": "lakebase" if prior_messages else "none"})
 
         # Recall long-term memory
         if user_id and _store_available and store:
-            try:
-                results = await store.asearch(("users", safe_user_id), query=user_message, limit=5)
-                recalled_memories = [
-                    {"key": r.key, "content": r.value.get("content", "")}
-                    for r in results
-                ]
-            except Exception:
-                pass
+            with mlflow.start_span(name="recall_user_memory", span_type="RETRIEVER") as span:
+                try:
+                    results = await store.asearch(("users", safe_user_id), query=user_message, limit=5)
+                    recalled_memories = [
+                        {"key": r.key, "content": r.value.get("content", "")}
+                        for r in results
+                    ]
+                except Exception:
+                    pass
+                span.set_outputs({"memories_found": len(recalled_memories)})
 
         if prior_messages:
             conversation_context = " ".join(
@@ -802,15 +819,21 @@ async def run_agent_stream(
 
         # Pre-LLM guardrails
         if GUARDRAILS_ENABLED and _pre_guardrails:
-            pre_result = _pre_guardrails.check(user_message, conversation_context=conversation_context)
-            if pre_result.get("blocked"):
-                yield json.dumps({"event": "error", "data": pre_result.get("message", "Blocked.")})
-                return
+            with mlflow.start_span(name="pre_llm_guardrails", span_type="GUARDRAIL") as span:
+                pre_result = _pre_guardrails.check(user_message, conversation_context=conversation_context)
+                span.set_inputs({"message": user_message[:200]})
+                span.set_outputs(pre_result)
+                if pre_result.get("blocked"):
+                    yield json.dumps({"event": "error", "data": pre_result.get("message", "Blocked.")})
+                    return
 
         # RAG retrieval
-        recent_user_msgs = [m["content"] for m in all_messages if m.get("role") == "user"][-3:]
-        retrieval_query = " ".join(recent_user_msgs)
-        context_text, retrieved_docs = _search_docs(retrieval_query)
+        with mlflow.start_span(name="search_docs", span_type="RETRIEVER") as span:
+            recent_user_msgs = [m["content"] for m in all_messages if m.get("role") == "user"][-3:]
+            retrieval_query = " ".join(recent_user_msgs)
+            context_text, retrieved_docs = _search_docs(retrieval_query)
+            span.set_inputs({"query": retrieval_query[:200]})
+            span.set_outputs({"docs_found": len(retrieved_docs)})
 
         # Build prompt
         augmented = [
@@ -828,25 +851,36 @@ async def run_agent_stream(
         # ── Send thread_id immediately ──
         yield json.dumps({"event": "metadata", "thread_id": thread_id, "user_id": user_id or ""})
 
-        # ── Stream LLM response ──
+        # ── Stream LLM response (spans closed before yield) ──
+        llm_start = time.time()
         full_response = []
         for chunk in _call_llm_stream(augmented):
             full_response.append(chunk)
             yield json.dumps({"event": "token", "data": chunk})
 
         response_text = "".join(full_response)
+        llm_duration_ms = (time.time() - llm_start) * 1000
+
+        # Log LLM span after streaming completes
+        with mlflow.start_span(name="call_llm_stream", span_type="LLM") as span:
+            span.set_inputs({"messages_count": len(augmented), "streaming": True})
+            span.set_outputs({"content_length": len(response_text), "duration_ms": round(llm_duration_ms, 2)})
 
         # ── Post-LLM guardrails ──
         if GUARDRAILS_ENABLED and _post_guardrails:
-            post_result = _post_guardrails.check(
-                user_message, response_text,
-                {"retrieved_docs": retrieved_docs, "user_id": user_id or ""})
-            if post_result.get("blocked"):
-                response_text = post_result.get("message", "Response filtered.")
-                yield json.dumps({"event": "replace", "data": response_text})
+            with mlflow.start_span(name="post_llm_guardrails", span_type="GUARDRAIL") as span:
+                post_result = _post_guardrails.check(
+                    user_message, response_text,
+                    {"retrieved_docs": retrieved_docs, "user_id": user_id or ""})
+                span.set_inputs({"response_length": len(response_text)})
+                span.set_outputs(post_result)
+                if post_result.get("blocked"):
+                    response_text = post_result.get("message", "Response filtered.")
+                    yield json.dumps({"event": "replace", "data": response_text})
 
         # ── Save session history ──
         if _store_available and store:
+          with mlflow.start_span(name="save_session_history", span_type="TOOL") as span:
             try:
                 updated_messages = list(all_messages) + [
                     {"role": "assistant", "content": response_text}
@@ -857,8 +891,10 @@ async def run_agent_stream(
                      "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                      "turn_count": sum(1 for m in updated_messages if m.get("role") == "user")},
                 )
+                span.set_outputs({"messages_saved": len(updated_messages)})
             except Exception as e:
                 logger.error(f"Failed to save history: {e}")
+                span.set_attributes({"error": str(e)})
 
         # Save conversation summary
         if user_id and safe_user_id and _store_available and store:
@@ -876,6 +912,14 @@ async def run_agent_stream(
                 pass
 
         latency_ms = (time.time() - start_time) * 1000
+        root_span.set_attributes({
+            "agentops.latency_ms": round(latency_ms, 2),
+            "agentops.session.thread_id": thread_id,
+            "agentops.session.history_turns": len(prior_messages) // 2,
+            "agentops.memory.recalled_count": len(recalled_memories),
+        })
+        root_span.set_outputs({"response": response_text[:300], "thread_id": thread_id})
+
         yield json.dumps({"event": "done", "latency_ms": round(latency_ms, 2)})
         logger.info(f"Stream completed: thread={thread_id} latency={latency_ms:.0f}ms")
 
