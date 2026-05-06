@@ -72,8 +72,15 @@
 </div>
 
 <script>
-let threadId = null;
+let threadId = localStorage.getItem('agentops_thread_id') || null;
 let sending = false;
+
+// Restore thread display on page load
+if (threadId) {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('threadDisplay').textContent = threadId.substring(0, 12) + '...';
+  });
+}
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -84,6 +91,7 @@ function handleKey(e) {
 
 function newThread() {
   threadId = null;
+  localStorage.removeItem('agentops_thread_id');
   document.getElementById('threadDisplay').textContent = 'new';
   document.getElementById('chat').innerHTML = '';
   addSystemMessage('Started new conversation');
@@ -210,6 +218,7 @@ async function send() {
 
     if (co.thread_id) {
       threadId = co.thread_id;
+      localStorage.setItem('agentops_thread_id', threadId);
       document.getElementById('threadDisplay').textContent = threadId.substring(0, 12) + '...';
     }
 
