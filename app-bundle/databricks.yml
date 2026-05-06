@@ -36,8 +36,6 @@ resources:
             value: ${var.sql_warehouse_id}
           - name: EMBEDDING_ENDPOINT
             value: ${var.embedding_model}
-          - name: MLFLOW_EXPERIMENT_ID
-            value: ${var.mlflow_experiment_id}
           - name: MLFLOW_EXPERIMENT_NAME
             value: /Users/${workspace.current_user.userName}/agentops-app
 
@@ -46,11 +44,6 @@ resources:
           serving_endpoint:
             name: ${var.llm_endpoint}
             permission: CAN_QUERY
-
-        - name: app-experiment
-          experiment:
-            experiment_id: ${resources.experiments.agentops_app_experiment.id}
-            permission: CAN_EDIT
 
 variables:
   catalog:
@@ -71,9 +64,6 @@ variables:
   sql_warehouse_id:
     description: SQL warehouse ID for UC session writes
     default: "3c623898df7d3c96"
-  mlflow_experiment_id:
-    description: MLflow experiment ID for trace logging
-    default: ""
 
 targets:
   dev:
@@ -90,4 +80,3 @@ targets:
     variables:
       catalog: mc_edacde
       sql_warehouse_id: "78563e1df52edcf3"
-      mlflow_experiment_id: ""
