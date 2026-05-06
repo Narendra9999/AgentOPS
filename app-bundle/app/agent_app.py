@@ -29,9 +29,21 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 # ── MLflow ──
 mlflow.set_tracking_uri("databricks")
 _experiment_id = os.getenv("MLFLOW_EXPERIMENT_ID")
+_experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME")
 if _experiment_id:
     mlflow.set_experiment(experiment_id=_experiment_id)
-logger.info(f"MLflow configured: experiment_id={_experiment_id}")
+    logger.info(f"MLflow configured: experiment_id={_experiment_id}")
+elif _experiment_name:
+    mlflow.set_experiment(experiment_name=_experiment_name)
+    logger.info(f"MLflow configured: experiment_name={_experiment_name}")
+else:
+    # Auto-create experiment based on app name
+    _auto_name = f"/Users/{os.getenv('DATABRICKS_CLIENT_ID', 'unknown')}/agentops-app"
+    try:
+        mlflow.set_experiment(experiment_name=_auto_name)
+        logger.info(f"MLflow configured: auto-created experiment={_auto_name}")
+    except Exception as e:
+        logger.warning(f"MLflow experiment setup failed: {e}")
 
 # ── Config from environment ──
 LLM_ENDPOINT = os.getenv("SERVING_ENDPOINT_NAME", "databricks-gpt-oss-120b")
