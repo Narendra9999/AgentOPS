@@ -12,15 +12,18 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 _import_error = None
 _import_traceback = None
 try:
-    from agent_app import run_agent
+    from agent_app import run_agent, run_agent_stream
 except Exception as e:
     _import_error = str(e)
     import traceback as _tb
     _import_traceback = _tb.format_exc()
+    run_agent = None
+    run_agent_stream = None
     run_agent = None
 
 app = FastAPI(title="AgentOPS Docs Chatbot", version="1.0.0")
@@ -118,6 +121,36 @@ async def invocations(request: ChatRequest):
             "user_id": result.get("user_id", ""),
         },
     }
+
+
+@app.post("/invocations/stream")
+async def invocations_stream(request: ChatRequest):
+    """Streaming version — returns Server-Sent Events as tokens are generated."""
+    thread_id = request.thread_id
+    user_id = request.user_id
+    if request.custom_inputs:
+        thread_id = thread_id or request.custom_inputs.get("thread_id")
+        user_id = user_id or request.custom_inputs.get("user_id")
+
+    if run_agent_stream is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"Agent not loaded: {_import_error}"},
+        )
+
+    async def event_generator():
+        try:
+            async for event in run_agent_stream(
+                messages=request.messages,
+                thread_id=thread_id,
+                user_id=user_id,
+            ):
+                yield f"data: {event}\n\n"
+        except Exception as e:
+            import json
+            yield f"data: {json.dumps({'event': 'error', 'data': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":

@@ -408,6 +408,51 @@ def _call_llm(messages: list[dict], tools: list[dict] = None) -> dict:
     return {"content": content, "tool_calls": tool_calls}
 
 
+def _call_llm_stream(messages: list[dict]):
+    """Stream LLM response token by token. Yields content chunks as strings.
+
+    Does not support tool calls — use _call_llm for tool-enabled requests.
+    """
+    import requests as _requests
+
+    w = _get_ws()
+    token = w.config.token
+    host = w.config.host.rstrip("/")
+
+    body = {
+        "messages": messages,
+        "max_tokens": 4096,
+        "temperature": 0.1,
+        "stream": True,
+    }
+
+    resp = _requests.post(
+        f"{host}/serving-endpoints/{LLM_ENDPOINT}/invocations",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=body,
+        stream=True,
+        timeout=300,
+    )
+    resp.raise_for_status()
+
+    for line in resp.iter_lines():
+        if not line:
+            continue
+        line = line.decode("utf-8")
+        if line.startswith("data: "):
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    yield content
+            except (json.JSONDecodeError, IndexError):
+                continue
+
+
 # ── Main Agent Runner ──
 async def run_agent(
     messages: list[dict],
@@ -693,3 +738,150 @@ async def run_agent(
         "thread_id": thread_id,
         "user_id": user_id or "",
     }
+
+
+async def run_agent_stream(
+    messages: list[dict],
+    thread_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+):
+    """Streaming version of run_agent. Yields SSE events as the LLM generates tokens.
+
+    Performs all pre-processing (history, memory, guardrails, RAG) upfront,
+    then streams the LLM response token by token. Post-processing (guardrails,
+    save history) runs after streaming completes.
+    """
+    start_time = time.time()
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
+
+    user_message = messages[-1].get("content", "") if messages else ""
+    safe_user_id = user_id.replace(".", "_").replace("@", "_at_") if user_id else None
+
+    prior_messages = []
+    recalled_memories = []
+    conversation_context = ""
+
+    # ── Pre-processing (same as non-streaming) ──
+    _store_available = False
+    store = None
+    try:
+        store = AsyncDatabricksStore(**_get_store_kwargs())
+        await store.__aenter__()
+        await store.setup()
+        _store_available = True
+    except Exception as e:
+        logger.warning(f"Lakebase unavailable for stream: {e}")
+        store = None
+
+    try:
+        # Load session history
+        if _store_available and store:
+            try:
+                item = await store.aget(("conversations",), thread_id)
+                prior_messages = item.value.get("messages", []) if item and item.value else []
+            except Exception:
+                prior_messages = []
+
+        # Recall long-term memory
+        if user_id and _store_available and store:
+            try:
+                results = await store.asearch(("users", safe_user_id), query=user_message, limit=5)
+                recalled_memories = [
+                    {"key": r.key, "content": r.value.get("content", "")}
+                    for r in results
+                ]
+            except Exception:
+                pass
+
+        if prior_messages:
+            conversation_context = " ".join(
+                m["content"] for m in prior_messages if m.get("role") == "user"
+            )
+        all_messages = prior_messages + messages
+
+        # Pre-LLM guardrails
+        if GUARDRAILS_ENABLED and _pre_guardrails:
+            pre_result = _pre_guardrails.check(user_message, conversation_context=conversation_context)
+            if pre_result.get("blocked"):
+                yield json.dumps({"event": "error", "data": pre_result.get("message", "Blocked.")})
+                return
+
+        # RAG retrieval
+        recent_user_msgs = [m["content"] for m in all_messages if m.get("role") == "user"][-3:]
+        retrieval_query = " ".join(recent_user_msgs)
+        context_text, retrieved_docs = _search_docs(retrieval_query)
+
+        # Build prompt
+        augmented = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": f"Documentation Context:\n\n{context_text}"},
+        ]
+        if recalled_memories:
+            memory_lines = [f"  [{m['key']}]: {m['content']}" for m in recalled_memories]
+            augmented.append({
+                "role": "system",
+                "content": "User context from prior sessions:\n" + "\n".join(memory_lines),
+            })
+        augmented.extend(all_messages[-20:])
+
+        # ── Send thread_id immediately ──
+        yield json.dumps({"event": "metadata", "thread_id": thread_id, "user_id": user_id or ""})
+
+        # ── Stream LLM response ──
+        full_response = []
+        for chunk in _call_llm_stream(augmented):
+            full_response.append(chunk)
+            yield json.dumps({"event": "token", "data": chunk})
+
+        response_text = "".join(full_response)
+
+        # ── Post-LLM guardrails ──
+        if GUARDRAILS_ENABLED and _post_guardrails:
+            post_result = _post_guardrails.check(
+                user_message, response_text,
+                {"retrieved_docs": retrieved_docs, "user_id": user_id or ""})
+            if post_result.get("blocked"):
+                response_text = post_result.get("message", "Response filtered.")
+                yield json.dumps({"event": "replace", "data": response_text})
+
+        # ── Save session history ──
+        if _store_available and store:
+            try:
+                updated_messages = list(all_messages) + [
+                    {"role": "assistant", "content": response_text}
+                ]
+                await store.aput(
+                    ("conversations",), thread_id,
+                    {"messages": updated_messages,
+                     "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "turn_count": sum(1 for m in updated_messages if m.get("role") == "user")},
+                )
+            except Exception as e:
+                logger.error(f"Failed to save history: {e}")
+
+        # Save conversation summary
+        if user_id and safe_user_id and _store_available and store:
+            try:
+                user_turns = [m["content"] for m in all_messages if m.get("role") == "user"]
+                summary = (
+                    f"Last conversation (thread {thread_id}, "
+                    f"{time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}): "
+                    f"User asked about: {' | '.join(user_turns[-3:])}."
+                )
+                if response_text:
+                    summary += f" Last answer covered: {response_text[:200]}"
+                await store.aput(("users", safe_user_id), "last_conversation_summary", {"content": summary})
+            except Exception:
+                pass
+
+        latency_ms = (time.time() - start_time) * 1000
+        yield json.dumps({"event": "done", "latency_ms": round(latency_ms, 2)})
+        logger.info(f"Stream completed: thread={thread_id} latency={latency_ms:.0f}ms")
+
+    finally:
+        if store:
+            try:
+                await store.__aexit__(None, None, None)
+            except Exception:
+                pass
