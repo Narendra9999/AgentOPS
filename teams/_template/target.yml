@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────
+# Team Target Configuration
+#
+# Copy this file to teams/<your-team>/target.yml and fill in the values.
+# This gets included in databricks.yml as a deploy target.
+#
+# Deploy:  databricks bundle deploy -t team-<your-team>
+# Run:     databricks bundle run agentops_pipeline -t team-<your-team>
+# ─────────────────────────────────────────────────────────────
+
+targets:
+  team-TEMPLATE:                          # ← rename to: team-<your-team>
+    mode: development
+    workspace:
+      host: <WORKSPACE_URL>               # e.g. https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
+    variables:
+      # ── Required ──
+      catalog: <CATALOG>                  # e.g. mc_edacde
+      schema: <TEAM_SCHEMA>              # e.g. hr_agent (unique per team)
+      cluster_id: "<CLUSTER_ID>"          # existing all-purpose cluster
+      llm_endpoint: "<LLM_ENDPOINT>"      # e.g. databricks-gpt-oss-120b
+      embedding_model: "<EMBED_MODEL>"    # e.g. databricks-gte-large-en
+
+      # ── Agent Identity ──
+      agent_name: <TEAM>_agent            # e.g. hr_docs_agent (unique per team)
+      chatbot_name: <TEAM>-chatbot        # e.g. hr-docs-chatbot (serving endpoint name)
+
+      # ── Data Source ──
+      # "local" = load from teams/<team>/fixtures/ (air-gapped)
+      # URL = scrape from sitemap (e.g. https://docs.databricks.com/en/doc-sitemap.xml)
+      data_source_url: "local"
+
+      # ── Optional Overrides ──
+      # audit_schema: <TEAM>_audit        # defaults to <schema>_audit
+      # vs_endpoint: <TEAM>-vs-endpoint   # defaults to agentops-vs-endpoint
+      # vs_index: <TEAM>_docs_index       # defaults to databricks_docs_index
+      # chunk_size: "1000"
+      # chunk_overlap: "200"
+      # serving_scale_to_zero: "true"
+      # quality_gate_threshold: "3.5"

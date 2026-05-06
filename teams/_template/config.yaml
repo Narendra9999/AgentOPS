@@ -1,0 +1,109 @@
+# ─────────────────────────────────────────────────────────────
+# Team Agent Configuration
+#
+# Customize the agent's behavior for your team's use case.
+# This overrides the default config.yaml in src/agent_development/agent/
+#
+# Copy to teams/<your-team>/config.yaml and edit.
+# ─────────────────────────────────────────────────────────────
+
+agent:
+  name: TEMPLATE_agent                    # ← rename to your agent name
+  description: "TEMPLATE Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: TEMPLATE               # ← your team name
+    agentops.use_case: documentation      # ← your use case
+
+llm:
+  endpoint: databricks-gpt-oss-120b       # overridden by target.yml
+  max_tokens: 4096
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+system_prompt: |
+  You are a TEMPLATE Documentation Assistant. You help users understand:
+  - [Product/feature area 1]
+  - [Product/feature area 2]
+  - [Product/feature area 3]
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Include code snippets when relevant
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Keep responses concise and actionable
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: TEMPLATE_docs_index              # ← unique per team
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+evaluation:
+  scorer_mode: all
+  quality_gate_threshold: 3.5
+  judge_model: databricks-meta-llama-3-3-70b-instruct
+
+  builtin_scorers:
+    guidelines:
+      enabled: true
+      name: response_quality
+      rules:
+        - "The response must directly address the user's question"
+        - "The response must not include fabricated information"
+        - "The response must be concise and well-structured"
+    correctness:
+      enabled: true
+    relevance_to_query:
+      enabled: true
+    safety:
+      enabled: true
+
+  # LLM-as-Judge scorers loaded from scorers/llm_judge/*.yaml
+  # Override weights/thresholds here:
+  llm_judge_scorers: {}
+
+  # Domain scorers loaded from scorers/domain/*.yaml
+  # Add team-specific scorers there
+  domain_scorers: []
+
+guardrails:
+  enabled: true
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+    domain_context_keywords:
+      # ← Add your domain keywords here
+      - databricks
+      - spark
+      - delta
+    # Intent keywords and allowed_intents are no longer used.
+    # The intent check uses gibberish detection (see pre_llm.py).
+    # Off-topic questions are handled naturally by the LLM via system prompt.
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+    min_response_length: 20

@@ -8,8 +8,9 @@ include:
   - resources/batch-inference-resource.yml
   - resources/iterative-improvement-resource.yml
   # App deployed separately via app-bundle (Mastercard: TF 1.37, dev: standalone DAB)
-  # Uncomment only if deploying app through the main bundle
   # - resources/app-resource.yml
+  # Team targets — each team adds their target.yml via PR
+  - teams/*/target.yml
 
 variables:
   cluster_id:
