@@ -1,5 +1,10 @@
-# Complete app dependencies — 162 wheels from UC Volume (Python 3.11)
+# Complete app dependencies — wheels from UC Volume (Python 3.11)
 # Upload wheels with: ./scripts/sync_app_wheels.sh ./wheels <volume_path> --profile mastercard
+# Memory extra packages (Lakebase connectivity)
+/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/langgraph_checkpoint_postgres-3.0.5-py3-none-any.whl
+/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/psycopg-3.3.3-py3-none-any.whl
+/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/psycopg_binary-3.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/psycopg_pool-3.3.0-py3-none-any.whl
 /Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/aiohappyeyeballs-2.6.1-py3-none-any.whl
 /Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/aiohttp-3.13.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
 /Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/311/python311_all_libs/aiohttp_retry-2.9.1-py3-none-any.whl

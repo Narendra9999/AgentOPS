@@ -29,7 +29,7 @@ resources:
           - name: VS_NUM_RESULTS
             value: "5"
           - name: UC_SESSION_ENABLED
-            value: "true"
+            value: "false"
           - name: UC_SESSION_TABLE
             value: ${var.catalog}.${var.schema}.session_history
           - name: SQL_WAREHOUSE_ID

@@ -43,11 +43,26 @@ judge_name = dbutils.widgets.get("judge_name")
 
 # Ensure MLflow 3.x with genai module (needed for make_judge, GEPA, optimize_prompts)
 import subprocess, os
-_vol_path = "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs"
-if os.path.exists(_vol_path):
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _vol_path, "--no-index", "-q"])
+
+# Find wheels: bundled (DAB) → Mastercard volume → FEVM volume → PyPI
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_eval_dir = "/Workspace" + os.path.dirname(os.path.dirname(_nb_path))
+_wheels_path = None
+for _candidate in [
+    os.path.join(_eval_dir, "wheels"),
+    "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs",
+    "/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels",
+]:
+    if os.path.exists(_candidate) and any(f.endswith(".whl") for f in os.listdir(_candidate)):
+        _wheels_path = _candidate
+        break
+
+if _wheels_path:
+    print(f"Installing from: {_wheels_path}")
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "gepa", "--find-links", _wheels_path, "--no-index", "-q"])
 else:
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4", "dspy>=2.6", "-q"])
+    print("Installing from PyPI...")
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "gepa", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------
