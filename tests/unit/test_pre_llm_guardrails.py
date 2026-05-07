@@ -133,26 +133,42 @@ class TestToxicity:
 # ── Intent classification ────────────────────────────────────
 
 class TestIntent:
+    """Intent check uses gibberish deny-list — real language is always accepted.
+    Off-topic questions are handled by the LLM via system prompt, not guardrails."""
+
     def test_databricks_query_allowed(self, guardrails):
         result = guardrails.check("How do I create a Delta table in Databricks?")
         assert result["blocked"] is False
-        assert result["checks"]["intent"]["intent"] == "databricks_query"
+        assert result["checks"]["intent"]["intent"] == "accepted"
 
     def test_greeting_allowed(self, guardrails):
         result = guardrails.check("Hello, can you help me with something?")
         assert result["blocked"] is False
-        assert result["checks"]["intent"]["intent"] == "general_greeting"
+        assert result["checks"]["intent"]["intent"] == "accepted"
 
-    def test_off_topic_blocked(self, guardrails):
+    def test_off_topic_allowed(self, guardrails):
+        """Off-topic is NOT blocked — LLM redirects naturally via system prompt."""
         result = guardrails.check("What is the weather like today in New York?")
-        assert result["blocked"] is True
-        assert result["blocked_by"] == "intent"
-        assert result["checks"]["intent"]["intent"] == "off_topic"
+        assert result["blocked"] is False
+        assert result["checks"]["intent"]["intent"] == "accepted"
 
-    def test_poem_request_blocked(self, guardrails):
+    def test_poem_request_allowed(self, guardrails):
+        """Poems are NOT blocked — LLM redirects naturally via system prompt."""
         result = guardrails.check("Write me a poem about the ocean and the stars")
+        assert result["blocked"] is False
+        assert result["checks"]["intent"]["intent"] == "accepted"
+
+    def test_gibberish_blocked(self, guardrails):
+        """Gibberish IS blocked — random characters with no real words."""
+        result = guardrails.check("cccccdcnbbdbnkinvvenfdeikghciggtbrjjrfdktrri")
         assert result["blocked"] is True
-        assert result["blocked_by"] == "intent"
+        assert result["checks"]["intent"]["intent"] == "gibberish"
+
+    def test_non_text_blocked(self, guardrails):
+        """Non-text IS blocked — mostly numbers/symbols."""
+        result = guardrails.check("12345!@#$%^&*()67890")
+        assert result["blocked"] is True
+        assert result["checks"]["intent"]["intent"] == "non_text"
 
 
 # ── No intent config = allow everything ──────────────────────
