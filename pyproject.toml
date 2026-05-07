@@ -16,11 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
-# Iterative improvement (MemAlign/GEPA judge alignment + prompt optimization)
+# Iterative improvement (MemAlign + DSPy MIPROv2 prompt optimization)
 # Install via: pip install agentops-framework[optimization]
-# On Mastercard: pip install agentops-framework[optimization] \
-#   --index-url https://artifacts.mastercard.int/ui/packages/pypi/simple \
-#   --trusted-host artifacts.mastercard.int
 optimization = [
     "mlflow[genai]>=3.4",
     "dspy>=2.6",

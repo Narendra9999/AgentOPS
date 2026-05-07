@@ -62,10 +62,10 @@ for _candidate in [
 
 if _wheels_path:
     print(f"Installing from: {_wheels_path}")
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "gepa", "--find-links", _wheels_path, "--no-index", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _wheels_path, "--no-index", "-q"])
 else:
     print("Installing from PyPI...")
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "gepa", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.4,<3.11", "dspy>=2.6", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------

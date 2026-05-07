@@ -278,7 +278,7 @@ class IterativeOptimizer:
             max_metric_calls: Max evaluations during optimization
         """
         try:
-            from mlflow.genai.optimize import GepaPromptOptimizer
+            from mlflow.genai.optimize import DspyPromptOptimizer
 
             # Use aligned judge as scorer if available, otherwise base judge
             if scorers is None:
@@ -300,14 +300,13 @@ class IterativeOptimizer:
                 formatted = loaded_prompt.format(**kwargs)
                 return formatted
 
-            # Run GEPA prompt optimization
-            logger.info(f"Starting GEPA prompt optimization (max_metric_calls={max_metric_calls})")
+            # Run DSPy MIPROv2 prompt optimization
+            logger.info(f"Starting DSPy MIPROv2 prompt optimization (max_metric_calls={max_metric_calls})")
             result = mlflow.genai.optimize_prompts(
                 predict_fn=predict_fn,
                 train_data=eval_dataset,
                 prompt_uris=[prompt.uri],
-                optimizer=GepaPromptOptimizer(
-                    reflection_model=self.judge_model,
+                optimizer=DspyPromptOptimizer(
                     max_metric_calls=max_metric_calls,
                 ),
                 scorers=scorers,

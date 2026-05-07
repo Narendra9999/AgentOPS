@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 06 — Prompt Optimization with GEPA
-# MAGIC Runs GEPA prompt optimization using the aligned judge from notebook 05 as the scorer.
+# MAGIC # 06 — Prompt Optimization with DSPy MIPROv2
+# MAGIC Runs DSPy MIPROv2 prompt optimization using the aligned judge from notebook 05 as the scorer.
 # MAGIC
 # MAGIC **Prerequisites:**
 # MAGIC - Aligned judge registered (from 05_JudgeAlignment)
@@ -10,7 +10,7 @@
 # MAGIC **What this notebook does:**
 # MAGIC 1. Loads the aligned judge from the experiment
 # MAGIC 2. Loads the current system prompt from config / MLflow Prompt Registry
-# MAGIC 3. Runs N GEPA optimization rounds, checkpointing results to Delta
+# MAGIC 3. Runs N DSPy MIPROv2 optimization rounds, checkpointing results to Delta
 # MAGIC 4. Selects the best prompt and registers it in the MLflow Prompt Registry
 # MAGIC
 # MAGIC **Reference:** Notebook 06-PromptOptimization from at-bat-assistant
@@ -104,7 +104,7 @@ os.environ["DATABRICKS_TOKEN"] = _token
 
 REFLECTION_MODEL = f"databricks:/{judge_model}"
 PROMPT_NAME = f"{catalog}.{schema}.{agent_name}_system_prompt"
-CHECKPOINT_TABLE = f"{catalog}.{schema}.gepa_experiment_checkpoint"
+CHECKPOINT_TABLE = f"{catalog}.{schema}.dspy_mipro_experiment_checkpoint"
 
 # Set experiment
 _user = spark.sql("SELECT current_user()").first()[0]
@@ -192,7 +192,7 @@ try:
     print(f"Registered prompt: {PROMPT_NAME}")
 except Exception as e:
     print(f"Prompt Registry not available: {e}")
-    print("Will run GEPA without Prompt Registry (using direct prompt text)")
+    print("Will run DSPy MIPROv2 without Prompt Registry (using direct prompt text)")
 
 print(f"Prompt length: {len(current_prompt)} chars")
 print(current_prompt[:300] + "...")
@@ -210,7 +210,7 @@ golden_table = f"{catalog}.{schema}.eval_golden_dataset"
 eval_df = spark.table(golden_table).toPandas()
 print(f"Evaluation dataset: {len(eval_df)} rows from {golden_table}")
 
-# Convert to format for GEPA: list of dicts with 'inputs' and 'expectations'
+# Convert to format for DSPy MIPROv2: list of dicts with 'inputs' and 'expectations'
 eval_data = []
 for _, row in eval_df.iterrows():
     query = row.get("request", row.get("input", ""))
@@ -220,7 +220,7 @@ for _, row in eval_df.iterrows():
         entry["expectations"] = {"expected_response": expected}
     eval_data.append(entry)
 
-print(f"Converted to GEPA format: {len(eval_data)} rows")
+print(f"Converted to DSPy MIPROv2 format: {len(eval_data)} rows")
 
 # COMMAND ----------
 
@@ -262,14 +262,14 @@ print(f"Predict function validated ({len(_test)} chars)")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Run GEPA optimization rounds
+# MAGIC ## 6. Run DSPy MIPROv2 optimization rounds
 # MAGIC
 # MAGIC Each run produces a candidate prompt. Results are checkpointed to a Delta table
 # MAGIC so optimization can be resumed if interrupted.
 
 # COMMAND ----------
 
-from mlflow.genai.optimize import GepaPromptOptimizer
+from mlflow.genai.optimize import DspyPromptOptimizer
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
 import time
 
@@ -296,7 +296,7 @@ print(f"Remaining runs: {set(range(N_RUNS)) - completed_runs}")
 
 # COMMAND ----------
 
-# Run GEPA optimization
+# Run DSPy MIPROv2 optimization
 # Ensure prompt is registered (needed for optimize_prompts)
 if not _prompt_registered:
     try:
@@ -304,14 +304,14 @@ if not _prompt_registered:
         _prompt_registered = True
         print(f"Registered prompt: {PROMPT_NAME} (uri={_prompt_obj.uri})")
     except Exception as e:
-        print(f"Cannot register prompt for GEPA: {e}")
-        print("GEPA optimization requires Prompt Registry. Skipping.")
+        print(f"Cannot register prompt for DSPy MIPROv2: {e}")
+        print("DSPy MIPROv2 optimization requires Prompt Registry. Skipping.")
         import json
         dbutils.notebook.exit(json.dumps({"status": "skipped", "reason": "Prompt Registry unavailable"}))
 
 # Use version number (not 'latest') to load prompt
 prompt_uri = f"prompts:/{PROMPT_NAME}/1"
-print(f"Prompt URI for GEPA: {prompt_uri}")
+print(f"Prompt URI for DSPy MIPROv2: {prompt_uri}")
 
 for run_idx in range(N_RUNS):
     if run_idx in completed_runs:
@@ -319,7 +319,7 @@ for run_idx in range(N_RUNS):
         continue
 
     print(f"\n{'=' * 60}")
-    print(f"  GEPA Run {run_idx + 1}/{N_RUNS}")
+    print(f"  DSPy MIPROv2 Run {run_idx + 1}/{N_RUNS}")
     print(f"{'=' * 60}")
 
     t0 = time.time()
@@ -328,8 +328,7 @@ for run_idx in range(N_RUNS):
             predict_fn=predict_fn,
             train_data=eval_data,
             prompt_uris=[prompt_uri],
-            optimizer=GepaPromptOptimizer(
-                reflection_model=REFLECTION_MODEL,
+            optimizer=DspyPromptOptimizer(
                 max_metric_calls=MAX_METRIC_CALLS,
             ),
             scorers=[aligned_judge],
@@ -383,15 +382,15 @@ if not phase_results:
 best_run = max(phase_results, key=lambda r: r["final_score"] or 0)
 best_prompt_text = best_run["prompt_template"]
 
-gepa_df = pd.DataFrame(phase_results)
-gepa_df["lift"] = gepa_df["final_score"] / gepa_df["initial_score"].clip(lower=0.001)
+dspy_mipro_df = pd.DataFrame(phase_results)
+dspy_mipro_df["lift"] = dspy_mipro_df["final_score"] / dspy_mipro_df["initial_score"].clip(lower=0.001)
 
-print("GEPA OPTIMIZATION RESULTS")
+print("DSPy MIPROv2 OPTIMIZATION RESULTS")
 print("=" * 90)
-print(gepa_df[["run_idx", "initial_score", "final_score", "lift", "elapsed_seconds"]].to_string(index=False, float_format="%.4f"))
+print(dspy_mipro_df[["run_idx", "initial_score", "final_score", "lift", "elapsed_seconds"]].to_string(index=False, float_format="%.4f"))
 
-print(f"\n  Initial mean (1-5): {gepa_df['initial_score'].mean() * 5:.2f}")
-print(f"  Final mean (1-5):   {gepa_df['final_score'].mean() * 5:.2f}")
+print(f"\n  Initial mean (1-5): {dspy_mipro_df['initial_score'].mean() * 5:.2f}")
+print(f"  Final mean (1-5):   {dspy_mipro_df['final_score'].mean() * 5:.2f}")
 print(f"  Best run: {best_run['run_idx']} (score: {best_run['initial_score']:.3f} -> {best_run['final_score']:.3f})")
 
 # Register best prompt
@@ -399,11 +398,11 @@ new_prompt = mlflow.genai.register_prompt(
     name=PROMPT_NAME,
     template=best_prompt_text,
     commit_message=(
-        f"Best prompt from GEPA (run={best_run['run_idx']}, "
+        f"Best prompt from DSPy MIPROv2 (run={best_run['run_idx']}, "
         f"score: {best_run['initial_score']:.3f} -> {best_run['final_score']:.3f}, "
         f"judge: {aligned_judge_name})"
     ),
-    tags={"experiment": "gepa_optimization", "run_idx": str(best_run["run_idx"])},
+    tags={"experiment": "dspy_mipro_optimization", "run_idx": str(best_run["run_idx"])},
 )
 print(f"\nRegistered optimized prompt: {PROMPT_NAME} (version {new_prompt.version})")
 print(f"First 300 chars:\n{best_prompt_text[:300]}...")
@@ -432,7 +431,7 @@ pipeline = PipelineStepLogger(
 )
 pipeline.start()
 
-step = pipeline.start_step("gepa_optimization", step_order=1, step_type="optimization")
+step = pipeline.start_step("dspy_mipro_optimization", step_order=1, step_type="optimization")
 pipeline.end_step(step, status="COMPLETED", records_processed=len(eval_data), output_summary={
     "n_runs": N_RUNS,
     "max_metric_calls": MAX_METRIC_CALLS,
