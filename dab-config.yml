@@ -20,3 +20,4 @@ mandatory_fields:
     skip_auto_rollback: false
     skip_bundle_run: false
     databricks_jobs_and_pipeline_to_trigger: "agentops_pipeline"
+    target: "dev"                         # ← team PR updates this (e.g. team-platform-eng)
