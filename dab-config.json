@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "job_cluster": {},
+  "usecase_specific_var": {
+    "sp_id": "<SERVICE_PRINCIPAL_ID>",
+    "alert_mail_id": "<ALERT_EMAIL>"
+  },
+  "mandatory_fields": {
+    "workspace": {
+      "workspace_name": "mastercard-edacde",
+      "dab_workspace_host": "https://mastercard-edacde-work-edacdedbx.cloud.databricks.com"
+    },
+    "dab_controllers": {
+      "skip_auto_rollback": false,
+      "skip_bundle_run": false,
+      "databricks_jobs_and_pipeline_to_trigger": "agentops_pipeline"
+    }
+  }
+}
