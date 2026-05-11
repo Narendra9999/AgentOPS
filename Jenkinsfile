@@ -132,7 +132,48 @@ pipeline {
                 script {
                     env.DEPLOY_TARGETS.split(',').each { target ->
                         echo "Deploying target: ${target}"
+
+                        // For team targets, overlay team config onto agent config
+                        // so RegisterModel packages the team-specific system prompt,
+                        // guardrails, scorers, and evaluation settings.
+                        def teamDir = ""
+                        if (target.startsWith("team-")) {
+                            // Resolve team directory from target name
+                            // team-platform-eng → platform-engineering, team-data-gov → data-governance, etc.
+                            def teamDirs = sh(
+                                script: """grep -l 'team_dir' teams/*/target.yml | while read f; do
+                                    dir=\$(dirname \$f | xargs basename)
+                                    tgt=\$(grep -A1 'targets:' \$f | tail -1 | sed 's/:.*//' | tr -d ' ')
+                                    if [ "\$tgt" = "${target}" ]; then echo \$dir; fi
+                                done""",
+                                returnStdout: true
+                            ).trim()
+                            if (teamDirs) {
+                                teamDir = teamDirs
+                                echo "Overlaying team config: teams/${teamDir}/config.yaml"
+                                sh "cp src/agent_development/agent/config.yaml src/agent_development/agent/config.yaml.bak"
+                                sh "cp teams/${teamDir}/config.yaml src/agent_development/agent/config.yaml"
+
+                                // Overlay team scorers (domain + llm_judge) if they exist
+                                sh """
+                                    if [ -d teams/${teamDir}/scorers/domain ] && ls teams/${teamDir}/scorers/domain/*.yaml 2>/dev/null; then
+                                        cp teams/${teamDir}/scorers/domain/*.yaml src/agent_development/agent_evaluation/evaluation/scorers/domain/
+                                        echo "Copied team domain scorers"
+                                    fi
+                                    if [ -d teams/${teamDir}/scorers/llm_judge ] && ls teams/${teamDir}/scorers/llm_judge/*.yaml 2>/dev/null; then
+                                        cp teams/${teamDir}/scorers/llm_judge/*.yaml src/agent_development/agent_evaluation/evaluation/scorers/llm_judge/
+                                        echo "Copied team LLM judge scorers"
+                                    fi
+                                """
+                            }
+                        }
+
                         sh "databricks bundle deploy -t ${target}"
+
+                        // Restore original config after deploy
+                        if (teamDir) {
+                            sh "mv src/agent_development/agent/config.yaml.bak src/agent_development/agent/config.yaml"
+                        }
                     }
                 }
             }
