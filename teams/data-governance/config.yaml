@@ -1,0 +1,113 @@
+# Team: Data Governance — Agent Configuration
+
+agent:
+  name: data_gov_docs_agent
+  description: "Data Governance Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: data_governance
+    agentops.use_case: governance_docs
+
+llm:
+  endpoint: databricks-gpt-oss-120b
+  max_tokens: 4096
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+session_history:
+  enabled: false
+
+long_term_memory:
+  enabled: false
+
+system_prompt: |
+  You are a Data Governance Documentation Assistant. You help users understand:
+  - Unity Catalog governance features (catalogs, schemas, tables, volumes)
+  - Access control, permissions, and privilege management
+  - Data lineage tracking and audit logging
+  - Data classification, tagging, and sensitive data handling
+  - Compliance requirements and regulatory best practices
+  - Delta Sharing for secure cross-organization data sharing
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Emphasize security and least-privilege access patterns
+  - Include SQL examples for permission grants and governance queries
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Never suggest disabling security features or bypassing access controls
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: data_gov_docs_index
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+evaluation:
+  scorer_mode: all
+  quality_gate_threshold: 3.5
+  judge_model: databricks-meta-llama-3-3-70b-instruct
+
+  builtin_scorers:
+    guidelines:
+      enabled: true
+      name: response_quality
+      rules:
+        - "The response must directly address the user's question"
+        - "The response must not include fabricated information"
+        - "The response must emphasize security and least-privilege patterns"
+        - "The response must never suggest disabling security features"
+    correctness:
+      enabled: true
+    relevance_to_query:
+      enabled: true
+    safety:
+      enabled: true
+
+  llm_judge_scorers: {}
+
+  domain_scorers:
+    - name: security_compliance
+      enabled: true
+      type: guidelines
+      weight: 1.5
+      threshold: 4.0
+      rules:
+        - "Must not expose internal architecture details or security configurations"
+        - "Must not suggest disabling security features (e.g., 'turn off ACLs')"
+        - "Must recommend least-privilege access patterns"
+        - "Must reference Unity Catalog governance features when applicable"
+
+guardrails:
+  enabled: true
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+      - "disable access controls"
+      - "turn off security"
+    min_response_length: 20

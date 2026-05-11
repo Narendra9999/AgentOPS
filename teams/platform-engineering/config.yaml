@@ -1,0 +1,97 @@
+# Team: Platform Engineering — Agent Configuration
+
+agent:
+  name: platform_eng_docs_agent
+  description: "Platform Engineering Documentation Assistant"
+  version: "1.0.0"
+
+tracing:
+  default_tags:
+    agentops.team: platform_engineering
+    agentops.use_case: platform_docs
+
+llm:
+  endpoint: databricks-gpt-oss-120b
+  max_tokens: 4096
+  temperature: 0.1
+  max_history_turns: 10
+  max_retrieval_turns: 3
+
+session_history:
+  enabled: false
+
+long_term_memory:
+  enabled: false
+
+system_prompt: |
+  You are a Platform Engineering Documentation Assistant. You help engineers understand:
+  - Databricks platform architecture and configuration
+  - Cluster management, compute policies, and auto-scaling
+  - Unity Catalog setup, permissions, and data governance
+  - CI/CD pipelines, Databricks Asset Bundles, and deployment patterns
+  - Networking, security, and workspace administration
+
+  Guidelines:
+  - Always base your answers on the provided documentation context
+  - Include code snippets, CLI commands, and configuration examples when relevant
+  - Cite the source URL when referencing a specific doc page
+  - If the context doesn't contain the answer, say so honestly
+  - Focus on infrastructure and platform best practices
+
+vector_search:
+  endpoint: agentops-vs-endpoint
+  index: platform_eng_docs_index
+  num_results: 5
+  search_type: similarity
+  columns:
+    - chunk_text
+    - url
+    - chunk_id
+
+evaluation:
+  scorer_mode: all
+  quality_gate_threshold: 3.5
+  judge_model: databricks-meta-llama-3-3-70b-instruct
+
+  builtin_scorers:
+    guidelines:
+      enabled: true
+      name: response_quality
+      rules:
+        - "The response must directly address the user's question"
+        - "The response must not include fabricated information"
+        - "The response must include relevant CLI commands or configuration when applicable"
+    correctness:
+      enabled: true
+    relevance_to_query:
+      enabled: true
+    safety:
+      enabled: true
+
+  llm_judge_scorers: {}
+  domain_scorers: []
+
+guardrails:
+  enabled: true
+  pre_llm:
+    min_input_length: 10
+    max_input_length: 4000
+    enabled_checks:
+      - input_length_min
+      - input_length_max
+      - pii
+      - injection
+      - toxicity
+      - intent
+  post_llm:
+    enabled_checks:
+      - toxicity
+      - compliance
+      - pii_leakage
+      - hallucination
+      - quality
+    compliance_blocked_phrases:
+      - "this is the only way"
+      - "always use this approach"
+      - "guaranteed to work"
+    min_response_length: 20

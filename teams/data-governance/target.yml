@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────
+# Team: Data Governance
+#
+# Deploy:  databricks bundle deploy -t team-data-gov
+# Run:     databricks bundle run agentops_pipeline -t team-data-gov
+# ─────────────────────────────────────────────────────────────
+
+targets:
+  team-data-gov:
+    mode: development
+    workspace:
+      host: https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
+    variables:
+      catalog: mc_edacde
+      schema: data_gov_agent
+      audit_schema: data_gov_audit
+      cluster_id: "<CLUSTER_ID>"
+      llm_endpoint: databricks-gpt-oss-120b
+      embedding_model: databricks-gte-large-en
+      agent_name: data_gov_docs_agent
+      chatbot_name: data-gov-chatbot
+      vs_index: data_gov_docs_index
+      data_source_url: "local"
