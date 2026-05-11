@@ -318,6 +318,7 @@ t0 = time.time()
 
 optimizer = MIPROv2(
     metric=eval_metric,
+    auto=None,
     num_candidates=NUM_CANDIDATES,
     num_threads=2,
     verbose=True,

@@ -358,7 +358,7 @@ class IterativeOptimizer:
             logger.info(f"Starting MIPROv2 optimization ({num_candidates} candidates, {len(trainset)} examples)")
             import time
             t0 = time.time()
-            optimizer = MIPROv2(metric=metric, num_candidates=num_candidates, num_threads=2)
+            optimizer = MIPROv2(metric=metric, auto=None, num_candidates=num_candidates, num_threads=2)
             optimized_agent = optimizer.compile(
                 agent, trainset=trainset,
                 max_bootstrapped_demos=max_bootstrapped_demos,
