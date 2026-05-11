@@ -7,30 +7,14 @@
 # PR workflow:
 #   1. Copy teams/_template/ to teams/<your-team>/
 #   2. Fill in target.yml (this file), config.yaml, fixtures/, scorers/
-#   3. Submit PR — Jenkins auto-deploys on merge to main
+#   3. Submit PR — Jenkins deploys via databricks.yml + dab-config.yml
 # ─────────────────────────────────────────────────────────────
 
-# ── Mastercard DAB Config (read by Jenkins CI/CD) ──
-version: "1.0"
-job_cluster: {}
-usecase_specific_var:
-  sp_id: "<SERVICE_PRINCIPAL_ID>"
-  alert_mail_id: "<ALERT_EMAIL>"
-mandatory_fields:
-  workspace:
-    workspace_name: "<WORKSPACE_NAME>"
-    dab_workspace_host: "<WORKSPACE_URL>"
-  dab_controllers:
-    skip_auto_rollback: false
-    skip_bundle_run: false
-    databricks_jobs_and_pipeline_to_trigger: "agentops_pipeline"
-
-# ── DAB Target (included by databricks.yml) ──
 targets:
   team-TEMPLATE:                          # ← rename to: team-<your-team>
     mode: development
     workspace:
-      host: <WORKSPACE_URL>               # same as dab_workspace_host above
+      host: <WORKSPACE_URL>               # e.g. https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
     variables:
       # ── Required ──
       catalog: <CATALOG>                  # e.g. mc_edacde

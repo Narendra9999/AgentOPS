@@ -48,7 +48,7 @@ teams/<your-team>/
 ## How It Works
 
 ```
-PR merged → Jenkins reads target.yml
+PR merged → Jenkins reads databricks.yml + dab-config.yml (project root)
   → databricks bundle deploy -t team-<name>
     → uploads all code + team config to workspace
   → databricks bundle run agentops_pipeline -t team-<name>
