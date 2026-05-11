@@ -225,16 +225,25 @@ targets:
       schema: agentops
       audit_schema: agentops_audit
 
-  # Mastercard workspace — Jenkins uses "work" target
-  # Team-specific variables (schema, agent_name, team_config, etc.)
-  # are passed via --var flags from dab-config.yml
+  # Mastercard workspace — Jenkins triggers via dab-config.json
+  # Team PR updates the variables below for their deployment
   work:
     mode: development
     workspace:
       host: https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
     variables:
       catalog: mc_edacde
+      schema: agentops                          # ← team updates (e.g. platform_eng_agent)
+      audit_schema: agentops_audit              # ← team updates (e.g. platform_eng_audit)
+      cluster_id: "<CLUSTER_ID>"
+      llm_endpoint: databricks-gpt-oss-120b
+      embedding_model: databricks-gte-large-en
+      agent_name: databricks_docs_agent         # ← team updates (e.g. platform_eng_docs_agent)
+      chatbot_name: agentops-docs-chatbot       # ← team updates (e.g. platform-eng-chatbot)
+      vs_index: databricks_docs_index           # ← team updates (e.g. platform_eng_docs_index)
       data_source_url: "local"
+      team_dir: ""                              # ← team updates (e.g. platform-engineering)
+      team_config: ""                           # ← team updates (e.g. teams/platform-engineering/config.yaml)
 
   stage:
     mode: production
