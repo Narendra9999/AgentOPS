@@ -25,31 +25,26 @@ llm:
 # Session history persistence — save multi-turn conversations for analytics & replay
 # Both backends can be enabled simultaneously, or either one independently.
 session_history:
-  enabled: true
+  enabled: false                       # Serving endpoint is stateless — callers manage history
 
   # Unity Catalog Delta table — append-only, queryable via SQL/Spark
-  # Works everywhere: Spark SQL on clusters, SQL Statement API on Model Serving/Apps
   unity_catalog:
-    enabled: true
-    table: session_history           # Stored as {catalog}.{schema}.{table}
-    warehouse_id: 3c623898df7d3c96    # Serverless SQL warehouse (or "auto" to auto-discover)
-    # Columns auto-created: session_id, turn_number, role, content,
-    #   request_time, response_time_ms, model_endpoint, trace_id
+    enabled: false
+    table: session_history
+    warehouse_id: 3c623898df7d3c96
 
-  # Lakebase (via DatabricksStore) — low-latency conversation history + user memory
-  # Uses databricks_langchain.DatabricksStore which handles OAuth credential
-  # generation internally — no raw psycopg2 or connection strings needed.
+  # Lakebase — disabled for serving endpoint (no Lakebase role for endpoint SP)
   lakebase:
-    enabled: true
-    project: agentops-sessions         # Lakebase Autoscaling project name
-    branch: production                 # Lakebase branch
+    enabled: false
+    project: agentops-sessions
+    branch: production
 
 # Long-term agent memory — cross-session user facts with semantic search
 # Uses the same Lakebase DatabricksStore instance as session_history.lakebase.
 # Stored as namespace ("users", user_id) with semantic search via store.search().
 # Pass user_id in custom_inputs to enable: {"user_id": "user@example.com"}
 long_term_memory:
-  enabled: true
+  enabled: false                       # Disabled for stateless serving endpoint
 
 vector_search:
   endpoint: agentops-vs-endpoint
