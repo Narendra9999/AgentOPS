@@ -364,6 +364,7 @@ class IterativeOptimizer:
                 num_trials=num_candidates * 2,
                 max_bootstrapped_demos=max_bootstrapped_demos,
                 max_labeled_demos=max_labeled_demos,
+                minibatch=False,
             )
             elapsed = time.time() - t0
 
