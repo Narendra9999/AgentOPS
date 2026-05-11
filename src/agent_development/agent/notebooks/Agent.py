@@ -139,46 +139,24 @@ class DatabricksDocsAgent(AgentOPSBase):
     def _call_llm_stream(self, messages: list[dict]):
         """Stream LLM response token by token. Yields content chunks.
 
-        Uses the SDK's api_client for auth (works inside serving containers)
-        with stream=True for SSE streaming from the FMAPI endpoint.
+        Creates WorkspaceClient per-request (required for serving OBO auth),
+        uses the OpenAI-compatible client for streaming.
         """
-        import json as _json
         from databricks.sdk import WorkspaceClient
 
+        # Per-request client — required for model serving OBO credentials
         w = WorkspaceClient()
+        openai_client = w.serving_endpoints.get_open_ai_client()
 
-        body = {
-            "messages": messages,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "stream": True,
-        }
-
-        # Use raw HTTP via the SDK's authenticated session
-        resp = w.api_client._session.post(
-            f"{w.config.host}/serving-endpoints/{self.llm_endpoint}/invocations",
-            json=body,
+        for chunk in openai_client.chat.completions.create(
+            model=self.llm_endpoint,
+            messages=messages,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
             stream=True,
-            timeout=300,
-        )
-        resp.raise_for_status()
-
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            line = line.decode("utf-8")
-            if line.startswith("data: "):
-                data_str = line[6:]
-                if data_str.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = _json.loads(data_str)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    content = delta.get("content", "")
-                    if content:
-                        yield content
-                except (_json.JSONDecodeError, IndexError):
-                    continue
+        ):
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     @mlflow.trace(span_type="CHAIN")
     def _process_request(
