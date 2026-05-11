@@ -30,6 +30,7 @@ targets:
       # URL = scrape from sitemap (e.g. https://docs.databricks.com/en/doc-sitemap.xml)
       data_source_url: "local"
       team_dir: "<TEAM_DIR>"                # ← your team folder name (e.g. platform-engineering)
+      team_config: "teams/<TEAM_DIR>/config.yaml"  # ← path to team config relative to bundle root
 
       # ── Optional Overrides ──
       # audit_schema: <TEAM>_audit        # defaults to <schema>_audit

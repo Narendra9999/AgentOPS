@@ -16,6 +16,7 @@ dbutils.widgets.text("llm_endpoint", "")
 dbutils.widgets.text("vs_endpoint", "")
 dbutils.widgets.text("vs_index", "")
 dbutils.widgets.text("embedding_model", "")
+dbutils.widgets.text("team_config", "")
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
@@ -24,6 +25,7 @@ llm_endpoint = dbutils.widgets.get("llm_endpoint")
 vs_endpoint = dbutils.widgets.get("vs_endpoint")
 vs_index = dbutils.widgets.get("vs_index")
 embedding_model = dbutils.widgets.get("embedding_model")
+team_config = dbutils.widgets.get("team_config").strip()
 
 # COMMAND ----------
 
@@ -82,9 +84,20 @@ _nb_dir = os.path.dirname(_nb_path)  # .../notebooks
 _project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
 _bundle_root = os.path.dirname(_project_root)  # .../files (where pyproject.toml lives)
 _agent_dir = "/Workspace" + _nb_dir
-_config_path = os.path.join(os.path.dirname(_agent_dir), "config.yaml")
+_default_config = os.path.join(os.path.dirname(_agent_dir), "config.yaml")
 _tools_dir = os.path.join(os.path.dirname(_agent_dir), "tools")
 _framework_dir = os.path.join(_project_root, "framework")
+
+# Use team config if specified, otherwise shared default
+if team_config:
+    _config_path = os.path.join(_bundle_root, team_config)
+    if not os.path.exists(_config_path):
+        print(f"WARNING: Team config not found at {_config_path}, falling back to default")
+        _config_path = _default_config
+    else:
+        print(f"Using team config: {_config_path}")
+else:
+    _config_path = _default_config
 
 print(f"Project root (src): {_project_root}")
 print(f"Bundle root: {_bundle_root}")

@@ -22,3 +22,4 @@ targets:
       vs_index: platform_eng_docs_index
       data_source_url: "local"
       team_dir: "platform-engineering"
+      team_config: "teams/platform-engineering/config.yaml"

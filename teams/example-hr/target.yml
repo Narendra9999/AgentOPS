@@ -22,3 +22,4 @@ targets:
       vs_index: hr_docs_index
       data_source_url: "local"
       team_dir: "example-hr"
+      team_config: "teams/example-hr/config.yaml"

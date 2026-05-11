@@ -102,6 +102,9 @@ variables:
   team_dir:
     description: "Team directory name under teams/ (e.g., platform-engineering). Empty = use shared fixtures."
     default: ""
+  team_config:
+    description: "Path to team config.yaml relative to bundle root (e.g., teams/platform-engineering/config.yaml). Empty = use shared config."
+    default: ""
 
   # Model deployment parameters
   chatbot_name:

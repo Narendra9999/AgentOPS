@@ -80,6 +80,7 @@ resources:
               vs_endpoint: ${var.vs_endpoint}
               vs_index: ${var.vs_index}
               embedding_model: ${var.embedding_model}
+              team_config: ${var.team_config}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl

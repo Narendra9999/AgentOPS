@@ -22,3 +22,4 @@ targets:
       vs_index: data_gov_docs_index
       data_source_url: "local"
       team_dir: "data-governance"
+      team_config: "teams/data-governance/config.yaml"
