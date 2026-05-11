@@ -4,7 +4,6 @@ Each team deploys their own agent via PR. The directory structure:
 
 ```
 teams/<your-team>/
-  target.yml              # DAB config + Mastercard Jenkins fields + variables
   config.yaml             # Agent: system prompt, guardrails, eval settings
   fixtures/
     golden_dataset.json   # Eval questions + expected answers
@@ -21,65 +20,61 @@ teams/<your-team>/
    cp -r teams/_template teams/<your-team>
    ```
 
-2. Edit `target.yml`:
-   - Fill in Mastercard DAB config (`sp_id`, `alert_mail_id`, `workspace_name`)
-   - Set DAB variables (`catalog`, `schema`, `cluster_id`, `agent_name`, `chatbot_name`)
-   - Set `team_dir` and `team_config` to your team folder name
+2. Edit `config.yaml` — system prompt, guardrails, evaluation settings
 
-3. Edit `config.yaml`:
-   - Write your system prompt (domain-specific instructions)
-   - Configure guardrail rules and blocked phrases
-   - Set evaluation thresholds
-
-4. Add evaluation data:
+3. Add evaluation data:
    - `fixtures/golden_dataset.json` — 10+ Q&A pairs for quality evaluation
-   - `fixtures/adversarial_dataset.json` — guardrail test cases (injection, PII, etc.)
+   - `fixtures/adversarial_dataset.json` — guardrail test cases
 
-5. Add custom scorers (optional):
-   - `scorers/domain/*.yaml` — guidelines rules for your domain
-   - `scorers/llm_judge/*.yaml` — rubric-based LLM evaluation criteria
+4. Add custom scorers (optional):
+   - `scorers/domain/*.yaml` — guidelines rules
+   - `scorers/llm_judge/*.yaml` — rubric-based LLM evaluation
 
-6. Submit PR — Jenkins triggers on merge:
+5. Update `dab-config.yml` (project root) with your team variables:
+   ```yaml
+   variables:
+     schema: "my_team_agent"
+     audit_schema: "my_team_audit"
+     agent_name: "my_team_docs_agent"
+     chatbot_name: "my-team-chatbot"
+     vs_index: "my_team_docs_index"
+     team_dir: "my-team"
+     team_config: "teams/my-team/config.yaml"
    ```
-   databricks bundle deploy -t team-<your-team>
-   databricks bundle run agentops_pipeline -t team-<your-team>
+
+6. Submit PR — Jenkins deploys:
+   ```
+   databricks bundle deploy -t work --var="schema=my_team_agent" --var="agent_name=..." ...
+   databricks bundle run agentops_pipeline -t work
    ```
 
 ## How It Works
 
 ```
-PR merged → Jenkins reads databricks.yml + dab-config.yml (project root)
-  → databricks bundle deploy -t team-<name>
-    → uploads all code + team config to workspace
-  → databricks bundle run agentops_pipeline -t team-<name>
-    → Step 1: Data Ingestion (team fixtures or sitemap)
-    → Step 2: Data Preprocessing (chunking + embeddings)
-    → Step 3: Vector Search Setup (team-specific index)
+Team submits PR → updates teams/<team>/ + dab-config.yml variables
+  → Jenkins reads dab-config.yml
+  → databricks bundle deploy -t work --var=... (team variables)
+  → databricks bundle run agentops_pipeline -t work
+    → Step 1: Data Ingestion (team fixtures via team_dir)
+    → Step 2: Data Preprocessing
+    → Step 3: Vector Search Setup (team vs_index)
     → Step 4: Register Model (team config.yaml → system prompt, guardrails)
     → Step 5: Pre-Deployment Eval (team fixtures + scorers)
-    → Step 6: Deploy Agent (team-specific serving endpoint)
+    → Step 6: Deploy Agent (team chatbot_name → separate endpoint)
     → Step 7: Smoke Test
-    → Step 8: Post-Deployment Eval (team fixtures + scorers)
+    → Step 8: Post-Deployment Eval
 ```
 
 ## Team Isolation
 
-Each team gets isolated resources — no cross-team interference:
+Each team gets isolated resources via variable overrides:
 
-| Resource | Naming | Example |
-|----------|--------|---------|
-| Schema | `{team}_agent` | `platform_eng_agent` |
-| Audit schema | `{team}_audit` | `platform_eng_audit` |
-| Vector search index | `{team}_docs_index` | `platform_eng_docs_index` |
-| Serving endpoint | `{team}-chatbot` | `platform-eng-chatbot` |
-| Model | `{team}_docs_agent` | `platform_eng_docs_agent` |
-
-## What Teams Customize vs What the Framework Provides
-
-| Teams customize | Framework provides |
-|----------------|-------------------|
-| System prompt | RAG pipeline (ingestion, chunking, VS) |
-| Guardrail rules | Pre/post LLM guardrails engine |
-| Evaluation scorers + datasets | LLM-as-judge evaluation framework |
-| LLM endpoint choice | Model serving + endpoint management |
-| Domain-specific blocked phrases | MLflow tracing + audit logging |
+| Resource | Variable | Example |
+|----------|----------|---------|
+| Schema | `schema` | `platform_eng_agent` |
+| Audit schema | `audit_schema` | `platform_eng_audit` |
+| Vector search index | `vs_index` | `platform_eng_docs_index` |
+| Serving endpoint | `chatbot_name` | `platform-eng-chatbot` |
+| Model | `agent_name` | `platform_eng_docs_agent` |
+| Agent config | `team_config` | `teams/platform-engineering/config.yaml` |
+| Eval fixtures | `team_dir` | `platform-engineering` |

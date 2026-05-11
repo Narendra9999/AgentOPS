@@ -9,8 +9,6 @@ include:
   - resources/iterative-improvement-resource.yml
   # App deployed separately via app-bundle (Mastercard: TF 1.37, dev: standalone DAB)
   # - resources/app-resource.yml
-  # Team targets — each team adds their target.yml via PR
-  - teams/*/target.yml
 
 variables:
   cluster_id:
@@ -227,18 +225,16 @@ targets:
       schema: agentops
       audit_schema: agentops_audit
 
-  mastercard:
+  # Mastercard workspace — Jenkins uses "work" target
+  # Team-specific variables (schema, agent_name, team_config, etc.)
+  # are passed via --var flags from dab-config.yml
+  work:
     mode: development
     workspace:
-      host: <WORKSPACE_URL>              # TODO: set your workspace URL
+      host: https://mastercard-edacde-work-edacdedbx.cloud.databricks.com
     variables:
       catalog: mc_edacde
-      schema: agentops
-      audit_schema: agentops_audit
-      cluster_id: "<CLUSTER_ID>"         # TODO: set your cluster ID
-      data_source_url: "local"           # uses bundled dataset (no internet needed)
-      llm_endpoint: "<LLM_ENDPOINT>"     # TODO: e.g. databricks-gpt-oss-120b
-      embedding_model: "<EMBED_MODEL>"   # TODO: e.g. databricks-gte-large-en
+      data_source_url: "local"
 
   stage:
     mode: production

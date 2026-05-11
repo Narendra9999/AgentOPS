@@ -1,8 +1,10 @@
 # ─────────────────────────────────────────────────────────────
 # Mastercard DAB Config — read by Jenkins CI/CD
 #
-# Jenkins reads this file alongside databricks.yml to determine
-# what to deploy and which pipeline to trigger.
+# Team PR workflow:
+#   1. Add/update your team directory under teams/
+#   2. Update the variables section below with your team's values
+#   3. Submit PR — Jenkins deploys to the 'work' target with these variables
 # ─────────────────────────────────────────────────────────────
 
 version: "1.0"
@@ -20,4 +22,19 @@ mandatory_fields:
     skip_auto_rollback: false
     skip_bundle_run: false
     databricks_jobs_and_pipeline_to_trigger: "agentops_pipeline"
-    target: "dev"                         # ← team PR updates this (e.g. team-platform-eng)
+    target: "work"
+
+# ── Team Variables (updated per PR) ──
+# Jenkins passes these as --var flags to: databricks bundle deploy -t work
+variables:
+  cluster_id: "<CLUSTER_ID>"
+  llm_endpoint: "databricks-gpt-oss-120b"
+  embedding_model: "databricks-gte-large-en"
+  # ── Team-specific (update these in your PR) ──
+  schema: "agentops"                              # e.g. platform_eng_agent
+  audit_schema: "agentops_audit"                  # e.g. platform_eng_audit
+  agent_name: "databricks_docs_agent"             # e.g. platform_eng_docs_agent
+  chatbot_name: "agentops-docs-chatbot"           # e.g. platform-eng-chatbot
+  vs_index: "databricks_docs_index"               # e.g. platform_eng_docs_index
+  team_dir: ""                                    # e.g. platform-engineering
+  team_config: ""                                 # e.g. teams/platform-engineering/config.yaml
