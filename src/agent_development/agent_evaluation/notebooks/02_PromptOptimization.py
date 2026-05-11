@@ -339,6 +339,7 @@ with mlflow.start_run(run_name="dspy_mipro_optimization"):
     optimized_agent = optimizer.compile(
         agent,
         trainset=dspy_trainset,
+        num_trials=NUM_CANDIDATES * 2,
         max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
         max_labeled_demos=MAX_LABELED_DEMOS,
     )

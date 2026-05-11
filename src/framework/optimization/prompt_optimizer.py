@@ -361,6 +361,7 @@ class IterativeOptimizer:
             optimizer = MIPROv2(metric=metric, auto=None, num_candidates=num_candidates, num_threads=2)
             optimized_agent = optimizer.compile(
                 agent, trainset=trainset,
+                num_trials=num_candidates * 2,
                 max_bootstrapped_demos=max_bootstrapped_demos,
                 max_labeled_demos=max_labeled_demos,
             )
