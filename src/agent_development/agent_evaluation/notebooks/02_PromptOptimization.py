@@ -379,16 +379,47 @@ with mlflow.start_run(run_name="dspy_mipro_optimization"):
 # COMMAND ----------
 
 # Extract the optimized instructions from the compiled DSPy module
-optimized_instructions = optimized_agent.generate.signature.instructions
+# DSPy versions differ — try multiple access patterns
+_gen = optimized_agent.generate
+optimized_instructions = None
+for attr_path in ["signature.instructions", "extended_signature.instructions", "predict.signature.instructions"]:
+    obj = _gen
+    try:
+        for part in attr_path.split("."):
+            obj = getattr(obj, part)
+        optimized_instructions = obj
+        print(f"Extracted instructions via: generate.{attr_path}")
+        break
+    except AttributeError:
+        continue
+
+if optimized_instructions is None:
+    # Fallback: inspect all attributes for an instructions string
+    for attr_name in dir(_gen):
+        obj = getattr(_gen, attr_name, None)
+        if hasattr(obj, "instructions"):
+            optimized_instructions = obj.instructions
+            print(f"Extracted instructions via: generate.{attr_name}.instructions")
+            break
+
+if optimized_instructions is None:
+    print("WARNING: Could not extract optimized instructions from DSPy module")
+    print(f"Available attributes: {[a for a in dir(_gen) if not a.startswith('_')]}")
+    optimized_instructions = current_prompt  # fallback to original
+
 optimized_demos = []
 
 # Extract few-shot demonstrations if any were selected
-if hasattr(optimized_agent.generate, "demos") and optimized_agent.generate.demos:
-    for demo in optimized_agent.generate.demos:
-        optimized_demos.append({
-            "question": getattr(demo, "question", ""),
-            "answer": getattr(demo, "answer", ""),
-        })
+for demo_attr in ["demos", "compiled_demos"]:
+    demos_list = getattr(_gen, demo_attr, None)
+    if demos_list:
+        for demo in demos_list:
+            optimized_demos.append({
+                "question": getattr(demo, "question", ""),
+                "answer": getattr(demo, "answer", ""),
+            })
+        print(f"Extracted {len(optimized_demos)} demos via: generate.{demo_attr}")
+        break
 
 print(f"Optimized instructions ({len(optimized_instructions)} chars):")
 print(optimized_instructions[:500] + "...")

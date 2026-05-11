@@ -378,12 +378,34 @@ class IterativeOptimizer:
                     optimized_scores.append(0.0)
             optimized_score = sum(optimized_scores) / len(optimized_scores) if optimized_scores else 0.0
 
-            # Extract optimized prompt
-            optimized_instructions = optimized_agent.generate.signature.instructions
+            # Extract optimized prompt — try multiple DSPy attribute paths
+            _gen = optimized_agent.generate
+            optimized_instructions = None
+            for attr_path in ["signature.instructions", "extended_signature.instructions", "predict.signature.instructions"]:
+                obj = _gen
+                try:
+                    for part in attr_path.split("."):
+                        obj = getattr(obj, part)
+                    optimized_instructions = obj
+                    break
+                except AttributeError:
+                    continue
+            if optimized_instructions is None:
+                for attr_name in dir(_gen):
+                    obj = getattr(_gen, attr_name, None)
+                    if hasattr(obj, "instructions"):
+                        optimized_instructions = obj.instructions
+                        break
+            if optimized_instructions is None:
+                optimized_instructions = current_prompt
+
             demos = []
-            if hasattr(optimized_agent.generate, "demos") and optimized_agent.generate.demos:
-                demos = [{"question": getattr(d, "question", ""), "answer": getattr(d, "answer", "")}
-                         for d in optimized_agent.generate.demos]
+            for demo_attr in ["demos", "compiled_demos"]:
+                demos_list = getattr(_gen, demo_attr, None)
+                if demos_list:
+                    demos = [{"question": getattr(d, "question", ""), "answer": getattr(d, "answer", "")}
+                             for d in demos_list]
+                    break
 
             logger.info(f"MIPROv2 complete — baseline: {baseline_score:.3f}, optimized: {optimized_score:.3f}, "
                         f"demos: {len(demos)}, time: {elapsed:.0f}s")
