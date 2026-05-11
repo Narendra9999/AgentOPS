@@ -156,7 +156,17 @@ class DatabricksDocsAgent(AgentOPSBase):
             stream=True,
         ):
             if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+                content = chunk.choices[0].delta.content
+                # Some models stream content as a list of objects (reasoning + text)
+                if isinstance(content, list):
+                    text_parts = [
+                        item.get("text", item.get("content", ""))
+                        for item in content
+                        if isinstance(item, dict)
+                    ]
+                    content = "".join(text_parts)
+                if content:
+                    yield content
 
     @mlflow.trace(span_type="CHAIN")
     def _process_request(
