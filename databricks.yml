@@ -56,6 +56,9 @@ variables:
   raw_data_table:
     description: Table name for raw ingested documents
     default: databricks_docs_raw
+  skip_data_ingestion:
+    description: "Skip data ingestion step (true/false). Set true if team has pre-existing data in raw_data_table."
+    default: "false"
   preprocessed_data_table:
     description: Table name for chunked/preprocessed documents
     default: databricks_docs_chunked
@@ -242,6 +245,7 @@ targets:
       chatbot_name: agentops-docs-chatbot       # ← team updates (e.g. platform-eng-chatbot)
       vs_index: databricks_docs_index           # ← team updates (e.g. platform_eng_docs_index)
       data_source_url: "local"
+      skip_data_ingestion: "false"              # ← set "true" if team has pre-existing data in raw_data_table
       team_dir: ""                              # ← team updates (e.g. platform-engineering)
       team_config: ""                           # ← team updates (e.g. teams/platform-engineering/config.yaml)
 

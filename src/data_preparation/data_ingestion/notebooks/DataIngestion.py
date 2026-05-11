@@ -10,12 +10,23 @@ dbutils.widgets.text("schema", "agentops")
 dbutils.widgets.text("data_source_url", "https://docs.databricks.com/en/doc-sitemap.xml")
 dbutils.widgets.text("max_documents", "0")
 dbutils.widgets.text("raw_data_table", "databricks_docs_raw")
+dbutils.widgets.text("skip_data_ingestion", "false")
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
 data_source_url = dbutils.widgets.get("data_source_url")
 max_docs = int(dbutils.widgets.get("max_documents")) or None
 raw_data_table = dbutils.widgets.get("raw_data_table")
+skip_ingestion = dbutils.widgets.get("skip_data_ingestion").strip().lower() == "true"
+
+# COMMAND ----------
+
+# Skip ingestion if team has pre-existing data in raw_data_table
+if skip_ingestion:
+    table_name = f"{catalog}.{schema}.{raw_data_table}"
+    count = spark.table(table_name).count()
+    print(f"Skipping data ingestion — using pre-existing table: {table_name} ({count} rows)")
+    dbutils.notebook.exit(f"Skipped — {table_name} has {count} rows")
 
 # COMMAND ----------
 
