@@ -1,0 +1,62 @@
+[
+  {
+    "request": "How do I request time off?",
+    "expected_response": "Submit a time-off request through the HR portal under 'Leave Management'. Select your leave type (vacation, sick, personal), choose dates, and submit for manager approval. Requests should be submitted at least two weeks in advance for planned leave.",
+    "expected_facts": ["HR portal", "Leave Management", "leave type", "manager approval", "two weeks"],
+    "context": "leave_management"
+  },
+  {
+    "request": "What is the company's parental leave policy?",
+    "expected_response": "The company offers parental leave for both birth and non-birth parents. Refer to the Parental Leave Policy document in the HR portal for specific duration, eligibility, and benefits continuation details. Contact your HR Business Partner for personalized guidance.",
+    "expected_facts": ["parental leave", "birth and non-birth parents", "HR portal", "HR Business Partner"],
+    "context": "benefits"
+  },
+  {
+    "request": "How do I enroll in health benefits?",
+    "expected_response": "Enroll during the annual Open Enrollment period or within 30 days of a qualifying life event (marriage, birth, job change). Access the benefits portal, compare plan options, and submit your elections. Changes take effect on the first of the following month.",
+    "expected_facts": ["Open Enrollment", "30 days", "qualifying life event", "benefits portal"],
+    "context": "benefits"
+  },
+  {
+    "request": "What is the process for submitting an expense report?",
+    "expected_response": "Submit expense reports through the expense management system within 30 days of the expense. Attach receipts for all items over $25. Select the appropriate cost center and expense category. Reports go to your manager for approval, then to finance for processing.",
+    "expected_facts": ["expense management system", "30 days", "receipts", "cost center", "manager approval"],
+    "context": "finance"
+  },
+  {
+    "request": "How does the performance review process work?",
+    "expected_response": "Performance reviews follow an annual cycle: goal setting in Q1, mid-year check-in in Q3, and year-end review in Q4. Complete your self-assessment before the review meeting. Your manager provides ratings and feedback. Calibration ensures consistency across teams.",
+    "expected_facts": ["annual cycle", "goal setting", "mid-year check-in", "self-assessment", "calibration"],
+    "context": "performance"
+  },
+  {
+    "request": "How do I report a workplace concern?",
+    "expected_response": "Report concerns through the Ethics Hotline, your HR Business Partner, or the Employee Relations team. All reports are handled confidentially. The company has a strict non-retaliation policy for good-faith reports. You can report anonymously through the hotline.",
+    "expected_facts": ["Ethics Hotline", "HR Business Partner", "Employee Relations", "confidentially", "non-retaliation"],
+    "context": "compliance"
+  },
+  {
+    "request": "What is the onboarding process for new hires?",
+    "expected_response": "New hire onboarding includes: Day 1 orientation, IT setup and badge issuance, benefits enrollment within 30 days, compliance training completion within the first week, team introductions, and a 30-60-90 day plan with your manager.",
+    "expected_facts": ["orientation", "IT setup", "benefits enrollment", "compliance training", "30-60-90 day plan"],
+    "context": "onboarding"
+  },
+  {
+    "request": "How do I request a job transfer to another department?",
+    "expected_response": "Review open internal positions on the Internal Job Board. Discuss your interest with your current manager. Apply through the system — internal candidates receive priority consideration. The standard process includes an interview with the hiring manager and HR approval.",
+    "expected_facts": ["Internal Job Board", "current manager", "internal candidates", "priority consideration"],
+    "context": "career_development"
+  },
+  {
+    "request": "What training and development programs are available?",
+    "expected_response": "Available programs include: LinkedIn Learning for self-paced courses, tuition reimbursement for external education, leadership development programs, technical certifications, and mentorship matching. Check the Learning & Development portal for the full catalog.",
+    "expected_facts": ["LinkedIn Learning", "tuition reimbursement", "leadership development", "Learning & Development portal"],
+    "context": "career_development"
+  },
+  {
+    "request": "What is the work-from-home policy?",
+    "expected_response": "The company supports a hybrid work model. Employees work from the office a minimum number of days per week as determined by their team. Remote work arrangements require manager approval. Refer to the Remote Work Policy in the HR portal for specific guidelines.",
+    "expected_facts": ["hybrid work model", "manager approval", "Remote Work Policy", "HR portal"],
+    "context": "workplace"
+  }
+]

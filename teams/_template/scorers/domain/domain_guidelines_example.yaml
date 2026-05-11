@@ -1,0 +1,9 @@
+name: domain_guidelines_example
+enabled: false
+type: guidelines
+weight: 1.0
+threshold: null
+rules:
+  - "EXAMPLE: Replace with your domain-specific rules"
+  - "EXAMPLE: Must not expose internal architecture details"
+  - "EXAMPLE: Must recommend best practices for your domain"

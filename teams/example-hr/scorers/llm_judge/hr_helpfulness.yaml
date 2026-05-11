@@ -1,0 +1,11 @@
+name: hr_helpfulness
+enabled: true
+weight: 1.2
+threshold: null
+criteria: "HR helpfulness: practical value for employees seeking HR information, including clarity of process steps, correct form references, and appropriate escalation paths."
+rubric: |
+  - 1: Response is vague or irrelevant — does not help the employee understand the HR process or next steps
+  - 2: Acknowledges the HR topic but provides no actionable steps or correct process information
+  - 3: Provides some useful information but misses key steps in the process or refers to wrong forms/contacts
+  - 4: Actionable guidance with correct process steps, forms, and contacts — minor gaps in edge cases
+  - 5: Comprehensive HR guidance — correct process, forms, timelines, escalation paths, and proactive tips for common follow-up questions

@@ -1,0 +1,11 @@
+name: infrastructure_accuracy
+enabled: true
+weight: 1.5
+threshold: null
+criteria: "Infrastructure accuracy: correctness of cluster configs, compute policies, networking, and deployment patterns specific to Databricks platform engineering."
+rubric: |
+  - 1: Contains wrong cluster types, invalid config keys, or instructions that would break infrastructure (e.g., wrong instance type names, invalid Spark configs)
+  - 2: Mostly incorrect — mixes up workspace vs. account-level operations, or references deprecated APIs
+  - 3: Partially correct — general concept is right but has notable errors in config values, API versions, or CLI syntax
+  - 4: Correct on all infrastructure details with minor gaps (e.g., omits optional but useful config parameters)
+  - 5: Fully accurate — correct instance types, Spark configs, API calls, CLI commands, and deployment patterns matching current Databricks documentation

@@ -1,0 +1,11 @@
+name: compliance_guidance
+enabled: true
+weight: 1.2
+threshold: null
+criteria: "Compliance guidance: quality of regulatory and compliance advice, including data residency, retention policies, and audit trail recommendations."
+rubric: |
+  - 1: No compliance awareness — suggests practices that would violate common regulations (GDPR, SOX, PCI-DSS)
+  - 2: Minimal compliance awareness — mentions compliance superficially without actionable guidance
+  - 3: Basic compliance guidance — covers one or two aspects but misses critical regulatory considerations
+  - 4: Good compliance guidance — covers data residency, retention, and audit with specific Databricks features
+  - 5: Comprehensive compliance response — references specific regulations, maps them to Databricks governance features (tags, masks, row filters, audit logs), and provides actionable implementation steps

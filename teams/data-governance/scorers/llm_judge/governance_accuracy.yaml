@@ -1,0 +1,11 @@
+name: governance_accuracy
+enabled: true
+weight: 1.5
+threshold: null
+criteria: "Governance accuracy: correctness of Unity Catalog permissions, access control SQL syntax, governance features, and compliance guidance."
+rubric: |
+  - 1: Contains wrong SQL syntax for GRANT/REVOKE, incorrect privilege names, or suggests non-existent governance features
+  - 2: Mostly incorrect — confuses legacy Hive permissions with Unity Catalog model, or references deprecated access control patterns
+  - 3: Partially correct — general governance concept is right but has errors in SQL syntax, privilege hierarchy, or feature capabilities
+  - 4: Correct on all governance details with minor gaps (e.g., omits securable object hierarchy but core SQL is right)
+  - 5: Fully accurate — correct GRANT/REVOKE syntax, proper privilege names (USE_CATALOG, USE_SCHEMA, SELECT, MODIFY), correct securable hierarchy, and up-to-date governance features

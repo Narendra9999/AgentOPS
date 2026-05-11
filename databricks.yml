@@ -99,6 +99,9 @@ variables:
   eval_results_table:
     description: UC table name for per-row evaluation results
     default: eval_results
+  team_dir:
+    description: "Team directory name under teams/ (e.g., platform-engineering). Empty = use shared fixtures."
+    default: ""
 
   # Model deployment parameters
   chatbot_name:

@@ -1,0 +1,11 @@
+name: infrastructure_best_practices
+enabled: true
+type: guidelines
+weight: 1.5
+threshold: 4.0
+rules:
+  - "Must recommend production-ready configurations (not dev/test defaults)"
+  - "Must suggest appropriate cluster sizing and auto-scaling policies"
+  - "Must reference Databricks-recommended deployment patterns (DABs, Terraform)"
+  - "Must not suggest manual UI-only workflows for repeatable infrastructure tasks"
+  - "Must consider cost optimization when recommending compute configurations"

@@ -1,0 +1,62 @@
+[
+  {
+    "request": "How do I create a cluster policy to restrict instance types?",
+    "expected_response": "Create a cluster policy using the Clusters API or UI. Define a JSON policy document that restricts allowed instance types using the 'node_type_id' field with 'allowlist' constraint. Assign the policy to users/groups via permissions.",
+    "expected_facts": ["cluster policy", "JSON policy document", "node_type_id", "allowlist", "permissions"],
+    "context": "compute_management"
+  },
+  {
+    "request": "What is the recommended way to deploy Databricks resources with CI/CD?",
+    "expected_response": "Use Databricks Asset Bundles (DABs). Define your jobs, pipelines, and endpoints in databricks.yml. Use 'databricks bundle deploy' in your CI/CD pipeline. DABs support multiple targets (dev, staging, prod) and variable substitution.",
+    "expected_facts": ["Databricks Asset Bundles", "databricks.yml", "databricks bundle deploy", "multiple targets"],
+    "context": "deployment"
+  },
+  {
+    "request": "How do I configure auto-scaling for a cluster?",
+    "expected_response": "Set min_workers and max_workers in the cluster configuration. Databricks auto-scales between these bounds based on workload. For cost optimization, enable auto-termination after idle minutes. Consider spot instances for worker nodes.",
+    "expected_facts": ["min_workers", "max_workers", "auto-termination", "spot instances"],
+    "context": "compute_management"
+  },
+  {
+    "request": "How do I set up IP access lists for workspace security?",
+    "expected_response": "Configure IP access lists at the account level using the Account API or admin console. Create an allowlist with trusted IP ranges. Enable the feature for the workspace. All API and UI access will be restricted to listed IPs.",
+    "expected_facts": ["IP access lists", "account level", "allowlist", "IP ranges"],
+    "context": "networking"
+  },
+  {
+    "request": "How do I use Databricks secrets to store credentials?",
+    "expected_response": "Create a secret scope using 'databricks secrets create-scope'. Add secrets with 'databricks secrets put-secret'. Reference secrets in notebooks using dbutils.secrets.get(scope, key). Secrets are never displayed in notebook output.",
+    "expected_facts": ["secret scope", "create-scope", "put-secret", "dbutils.secrets.get"],
+    "context": "security"
+  },
+  {
+    "request": "What are init scripts and how do I configure them?",
+    "expected_response": "Init scripts run during cluster startup to install packages or configure the environment. Use cluster-scoped init scripts stored in workspace files, Unity Catalog volumes, or cloud storage. Global init scripts apply to all clusters in the workspace.",
+    "expected_facts": ["init scripts", "cluster startup", "cluster-scoped", "global init scripts"],
+    "context": "compute_management"
+  },
+  {
+    "request": "How do I set up Private Link for Databricks?",
+    "expected_response": "Configure AWS PrivateLink or Azure Private Link to route traffic through your VPC/VNet. Create private endpoints for the workspace (front-end) and back-end connectivity. This eliminates public internet exposure for the control plane and data plane.",
+    "expected_facts": ["Private Link", "private endpoints", "control plane", "data plane"],
+    "context": "networking"
+  },
+  {
+    "request": "How do I manage Databricks workspace using Terraform?",
+    "expected_response": "Use the Databricks Terraform provider. Configure the provider with host and token or service principal credentials. Define resources like databricks_cluster, databricks_job, databricks_permissions. Run terraform plan and terraform apply.",
+    "expected_facts": ["Terraform provider", "databricks_cluster", "databricks_job", "terraform apply"],
+    "context": "infrastructure_as_code"
+  },
+  {
+    "request": "How do I configure a compute policy for cost control?",
+    "expected_response": "Create compute policies that enforce cost constraints: limit instance types, set maximum cluster size, require auto-termination, enforce spot/preemptible instances for workers, and restrict DBU-intensive features. Assign policies to groups.",
+    "expected_facts": ["compute policies", "auto-termination", "spot", "maximum cluster size"],
+    "context": "cost_optimization"
+  },
+  {
+    "request": "What is serverless compute and when should I use it?",
+    "expected_response": "Serverless compute provides instant, managed clusters without infrastructure configuration. Use it for SQL warehouses, notebooks, and jobs. Benefits include zero startup time, automatic scaling, and no cluster management overhead. Best for interactive and bursty workloads.",
+    "expected_facts": ["serverless compute", "managed clusters", "zero startup time", "automatic scaling"],
+    "context": "compute_management"
+  }
+]

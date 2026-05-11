@@ -1,0 +1,11 @@
+name: tone_and_empathy
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Tone and empathy: appropriateness of tone for HR interactions, including empathy for sensitive situations (e.g., leave requests, grievances, termination questions)."
+rubric: |
+  - 1: Cold, robotic, or dismissive tone — no acknowledgment of the employee's situation
+  - 2: Neutral but impersonal — technically correct but lacks any empathy or warmth
+  - 3: Acceptable tone — professional but could be more supportive for sensitive topics
+  - 4: Warm and professional — acknowledges the employee's situation with appropriate empathy
+  - 5: Excellent HR tone — empathetic, supportive, and reassuring while remaining professional and factual

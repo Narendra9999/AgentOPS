@@ -1,0 +1,11 @@
+name: domain_accuracy_example
+enabled: false
+weight: 1.0
+threshold: null
+criteria: "EXAMPLE: Replace with your domain-specific accuracy criteria."
+rubric: |
+  - 1: EXAMPLE — Contains fabricated facts or instructions that would cause errors
+  - 2: EXAMPLE — Mostly incorrect or seriously misleading
+  - 3: EXAMPLE — Partially correct but has notable factual errors
+  - 4: EXAMPLE — Correct on all key facts with minor imprecisions
+  - 5: EXAMPLE — Fully accurate, matching current documentation

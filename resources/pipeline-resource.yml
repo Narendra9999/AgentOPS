@@ -99,6 +99,7 @@ resources:
               eval_golden_table: ${var.eval_golden_table}
               eval_adversarial_table: ${var.eval_adversarial_table}
               eval_results_table: ${var.eval_results_table}
+              team_dir: ${var.team_dir}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -166,6 +167,7 @@ resources:
               eval_adversarial_table: ${var.eval_adversarial_table}
               eval_results_table: ${var.eval_results_table}
               chatbot_name: ${var.chatbot_name}
+              team_dir: ${var.team_dir}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl

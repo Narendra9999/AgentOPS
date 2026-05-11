@@ -1,0 +1,10 @@
+name: data_classification
+enabled: true
+type: guidelines
+weight: 1.2
+threshold: 3.5
+rules:
+  - "Must recommend tagging and classification for sensitive data (PII, PCI, PHI)"
+  - "Must reference Unity Catalog tags and column masks for sensitive column protection"
+  - "Must suggest row-level security or dynamic views when access restriction is needed"
+  - "Must not recommend copying sensitive data to unprotected locations"

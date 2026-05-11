@@ -1,0 +1,62 @@
+[
+  {
+    "request": "How do I grant SELECT access on a table in Unity Catalog?",
+    "expected_response": "Use GRANT SELECT ON TABLE catalog.schema.table TO principal. The principal can be a user, group, or service principal. The grantor must have ownership or the GRANT permission on the securable.",
+    "expected_facts": ["GRANT SELECT", "ON TABLE", "principal", "user", "group", "service principal"],
+    "context": "access_control"
+  },
+  {
+    "request": "What is the Unity Catalog privilege hierarchy?",
+    "expected_response": "Unity Catalog uses a hierarchical model: metastore > catalog > schema > table/view/volume. Privileges inherit downward — granting USE CATALOG allows access to schemas within it. Key privileges: USE_CATALOG, USE_SCHEMA, SELECT, MODIFY, CREATE_TABLE, ALL_PRIVILEGES.",
+    "expected_facts": ["hierarchical", "metastore", "catalog", "schema", "USE_CATALOG", "USE_SCHEMA", "SELECT", "MODIFY"],
+    "context": "access_control"
+  },
+  {
+    "request": "How do I set up column-level masking in Unity Catalog?",
+    "expected_response": "Create a masking function using CREATE FUNCTION that returns masked values. Apply it to a column using ALTER TABLE SET MASK. The function receives the column value and optionally the invoking user. Users with the UNMASK permission see original values.",
+    "expected_facts": ["masking function", "CREATE FUNCTION", "ALTER TABLE SET MASK", "UNMASK permission"],
+    "context": "data_protection"
+  },
+  {
+    "request": "How do I track data lineage in Unity Catalog?",
+    "expected_response": "Unity Catalog automatically captures column-level lineage for SQL queries, notebooks, and jobs. View lineage in the Catalog Explorer UI under the Lineage tab. Query system.access.table_lineage and system.access.column_lineage tables for programmatic access.",
+    "expected_facts": ["column-level lineage", "Catalog Explorer", "table_lineage", "column_lineage", "system.access"],
+    "context": "lineage"
+  },
+  {
+    "request": "How do I configure row-level security in Unity Catalog?",
+    "expected_response": "Create a row filter function using CREATE FUNCTION that returns a boolean. Apply it using ALTER TABLE SET ROW FILTER. The function receives table columns and optionally current_user(). Rows where the function returns false are filtered out.",
+    "expected_facts": ["row filter", "CREATE FUNCTION", "ALTER TABLE SET ROW FILTER", "boolean", "current_user()"],
+    "context": "data_protection"
+  },
+  {
+    "request": "How do I audit who accessed a specific table?",
+    "expected_response": "Query the system.access.audit table in Unity Catalog. Filter by action_name for 'getTable', 'commandSubmit', or 'generateTemporaryTableCredential'. Join with request_params to see the specific table. Enable verbose audit logging for detailed query text.",
+    "expected_facts": ["system.access.audit", "action_name", "request_params", "audit logging"],
+    "context": "audit"
+  },
+  {
+    "request": "What is Delta Sharing and how does it work?",
+    "expected_response": "Delta Sharing is an open protocol for secure cross-organization data sharing. The provider creates shares containing tables and views. Recipients access shared data using their own compute. Unity Catalog manages sharing governance, including access control and audit logging.",
+    "expected_facts": ["Delta Sharing", "open protocol", "cross-organization", "shares", "provider", "recipient"],
+    "context": "data_sharing"
+  },
+  {
+    "request": "How do I classify sensitive data using Unity Catalog tags?",
+    "expected_response": "Apply tags to columns using ALTER TABLE ALTER COLUMN SET TAGS ('sensitivity' = 'pii'). Use tag-based policies to enforce access controls. Query system.information_schema.column_tags to discover all tagged columns. Tags support custom key-value pairs.",
+    "expected_facts": ["SET TAGS", "sensitivity", "tag-based policies", "column_tags", "information_schema"],
+    "context": "data_classification"
+  },
+  {
+    "request": "How do I set up a metastore in Unity Catalog?",
+    "expected_response": "Create a metastore in the account console, assign it a root storage location, and attach it to workspaces. Each region needs its own metastore. Assign a metastore admin who manages top-level permissions. Users need USE_CATALOG to access catalogs within it.",
+    "expected_facts": ["metastore", "account console", "root storage location", "metastore admin", "USE_CATALOG"],
+    "context": "setup"
+  },
+  {
+    "request": "What is the principle of least privilege in Unity Catalog?",
+    "expected_response": "Least privilege means granting only the minimum permissions needed for a task. In Unity Catalog: use USE_CATALOG and USE_SCHEMA instead of ALL_PRIVILEGES, grant SELECT on specific tables rather than schemas, use column masking for sensitive fields, and review permissions regularly.",
+    "expected_facts": ["least privilege", "minimum permissions", "USE_CATALOG", "USE_SCHEMA", "column masking"],
+    "context": "best_practice"
+  }
+]

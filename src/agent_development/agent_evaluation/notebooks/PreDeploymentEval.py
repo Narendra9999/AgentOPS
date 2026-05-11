@@ -16,6 +16,7 @@ dbutils.widgets.text("environment", "dev")
 dbutils.widgets.text("eval_golden_table", "eval_golden_dataset")
 dbutils.widgets.text("eval_adversarial_table", "eval_adversarial_dataset")
 dbutils.widgets.text("eval_results_table", "eval_results")
+dbutils.widgets.text("team_dir", "")
 
 agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
@@ -25,6 +26,7 @@ environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
+team_dir = dbutils.widgets.get("team_dir").strip()
 
 # COMMAND ----------
 
@@ -87,13 +89,26 @@ import pandas as pd
 import os, sys
 
 nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]
+# Project root: .../files/src → .../files
+_project_root = "/Workspace" + os.path.dirname(nb_root)
+
+def _resolve_fixture(filename):
+    """Resolve fixture path: team fixtures → shared fixtures."""
+    if team_dir:
+        team_path = os.path.join(_project_root, "teams", team_dir, "fixtures", filename)
+        if os.path.exists(team_path):
+            print(f"Using team fixture: {team_path}")
+            return team_path
+    shared_path = f"/Workspace/{nb_root}/agent_evaluation/evaluation/{filename}"
+    print(f"Using shared fixture: {shared_path}")
+    return shared_path
 
 # Golden dataset → UC table (if not already there)
 try:
     golden_pd = spark.table(f"{catalog}.{schema}.{eval_golden_table}").toPandas()
     print(f"Golden dataset: {len(golden_pd)} rows from UC table")
 except Exception:
-    golden_df = pd.read_json(f"/Workspace/{nb_root}/agent_evaluation/evaluation/golden_dataset.json")
+    golden_df = pd.read_json(_resolve_fixture("golden_dataset.json"))
     spark.createDataFrame(golden_df).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.{schema}.{eval_golden_table}")
     golden_pd = golden_df
     print(f"Golden dataset: {len(golden_pd)} rows loaded from JSON")
@@ -103,7 +118,7 @@ try:
     adversarial_pd = spark.table(f"{catalog}.{schema}.{eval_adversarial_table}").toPandas()
     print(f"Adversarial dataset: {len(adversarial_pd)} rows from UC table")
 except Exception:
-    adversarial_df = pd.read_json(f"/Workspace/{nb_root}/agent_evaluation/evaluation/adversarial_dataset.json")
+    adversarial_df = pd.read_json(_resolve_fixture("adversarial_dataset.json"))
     spark.createDataFrame(adversarial_df).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.{schema}.{eval_adversarial_table}")
     adversarial_pd = adversarial_df
     print(f"Adversarial dataset: {len(adversarial_pd)} rows loaded from JSON")

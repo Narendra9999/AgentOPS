@@ -1,0 +1,14 @@
+[
+  {
+    "request": "EXAMPLE: Replace with a question relevant to your team's domain",
+    "expected_response": "EXAMPLE: Replace with the expected answer from your documentation",
+    "expected_facts": ["EXAMPLE_FACT_1", "EXAMPLE_FACT_2", "EXAMPLE_FACT_3"],
+    "context": "example_category"
+  },
+  {
+    "request": "EXAMPLE: Another domain-specific question",
+    "expected_response": "EXAMPLE: The expected response with key facts your agent should include",
+    "expected_facts": ["key_concept", "api_name", "best_practice"],
+    "context": "example_category"
+  }
+]

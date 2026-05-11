@@ -15,6 +15,7 @@ dbutils.widgets.text("eval_golden_table", "eval_golden_dataset")
 dbutils.widgets.text("eval_adversarial_table", "eval_adversarial_dataset")
 dbutils.widgets.text("eval_results_table", "eval_results")
 dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
+dbutils.widgets.text("team_dir", "")
 
 agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
@@ -25,6 +26,7 @@ eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
 chatbot_name = dbutils.widgets.get("chatbot_name")
+team_dir = dbutils.widgets.get("team_dir").strip()
 
 # COMMAND ----------
 
@@ -60,6 +62,7 @@ eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
 chatbot_name = dbutils.widgets.get("chatbot_name")
+team_dir = dbutils.widgets.get("team_dir").strip()
 
 # COMMAND ----------
 
@@ -80,7 +83,7 @@ pipeline.start()
 # COMMAND ----------
 
 import pandas as pd
-import json
+import json, os
 
 # Create audit schema and tables if they don't exist
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{audit_schema}")
@@ -91,14 +94,26 @@ for _tname, _ddl in get_audit_ddls(catalog, audit_schema).items():
 
 # Resolve path relative to this notebook
 nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]
+_project_root = "/Workspace" + os.path.dirname(nb_root)
+
+def _resolve_fixture(filename):
+    """Resolve fixture path: team fixtures → shared fixtures."""
+    if team_dir:
+        team_path = os.path.join(_project_root, "teams", team_dir, "fixtures", filename)
+        if os.path.exists(team_path):
+            print(f"Using team fixture: {team_path}")
+            return team_path
+    shared_path = f"/Workspace/{nb_root}/agent_evaluation/evaluation/{filename}"
+    print(f"Using shared fixture: {shared_path}")
+    return shared_path
 
 # Golden dataset → UC table
-golden_df = pd.read_json(f"/Workspace/{nb_root}/agent_evaluation/evaluation/golden_dataset.json")
+golden_df = pd.read_json(_resolve_fixture("golden_dataset.json"))
 spark.createDataFrame(golden_df).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.{schema}.{eval_golden_table}")
 print(f"Golden: {len(golden_df)} rows → {catalog}.{schema}.{eval_golden_table}")
 
 # Adversarial dataset → UC table
-adversarial_df = pd.read_json(f"/Workspace/{nb_root}/agent_evaluation/evaluation/adversarial_dataset.json")
+adversarial_df = pd.read_json(_resolve_fixture("adversarial_dataset.json"))
 spark.createDataFrame(adversarial_df).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.{schema}.{eval_adversarial_table}")
 print(f"Adversarial: {len(adversarial_df)} rows → {catalog}.{schema}.{eval_adversarial_table}")
 

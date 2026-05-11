@@ -1,0 +1,10 @@
+name: security_hardening
+enabled: true
+type: guidelines
+weight: 1.2
+threshold: 3.5
+rules:
+  - "Must recommend network security best practices (private link, IP access lists)"
+  - "Must not suggest storing credentials in plain text or notebooks"
+  - "Must recommend Unity Catalog for data governance over legacy Hive metastore"
+  - "Must reference secrets management (Databricks secrets or external vaults) for sensitive values"

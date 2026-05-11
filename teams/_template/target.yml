@@ -29,6 +29,7 @@ targets:
       # "local" = load from teams/<team>/fixtures/ (air-gapped)
       # URL = scrape from sitemap (e.g. https://docs.databricks.com/en/doc-sitemap.xml)
       data_source_url: "local"
+      team_dir: "<TEAM_DIR>"                # ← your team folder name (e.g. platform-engineering)
 
       # ── Optional Overrides ──
       # audit_schema: <TEAM>_audit        # defaults to <schema>_audit

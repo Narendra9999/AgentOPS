@@ -1,0 +1,10 @@
+name: cli_and_automation
+enabled: true
+type: guidelines
+weight: 1.0
+threshold: null
+rules:
+  - "Must include CLI commands or API calls when the question involves automation"
+  - "Must use Databricks CLI v2 syntax (not legacy v1 commands)"
+  - "Must reference Databricks Asset Bundles for deployment automation when applicable"
+  - "Must distinguish between workspace-level and account-level API operations"

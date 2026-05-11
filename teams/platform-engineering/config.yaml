@@ -68,8 +68,27 @@ evaluation:
     safety:
       enabled: true
 
-  llm_judge_scorers: {}
-  domain_scorers: []
+  llm_judge_scorers:
+    infrastructure_accuracy:
+      weight: 1.5
+    operational_readiness:
+      weight: 1.0
+
+  domain_scorers:
+    - name: infrastructure_best_practices
+      enabled: true
+      type: guidelines
+      weight: 1.5
+      threshold: 4.0
+    - name: security_hardening
+      enabled: true
+      type: guidelines
+      weight: 1.2
+      threshold: 3.5
+    - name: cli_and_automation
+      enabled: true
+      type: guidelines
+      weight: 1.0
 
 guardrails:
   enabled: true

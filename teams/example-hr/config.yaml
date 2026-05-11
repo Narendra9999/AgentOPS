@@ -67,13 +67,23 @@ evaluation:
     safety:
       enabled: true
 
-  # LLM-as-Judge scorers loaded from scorers/llm_judge/*.yaml
-  # Override weights/thresholds here:
-  llm_judge_scorers: {}
+  llm_judge_scorers:
+    hr_helpfulness:
+      weight: 1.2
+    tone_and_empathy:
+      weight: 1.0
 
-  # Domain scorers loaded from scorers/domain/*.yaml
-  # Add team-specific scorers there
-  domain_scorers: []
+  domain_scorers:
+    - name: hr_policy_compliance
+      enabled: true
+      type: guidelines
+      weight: 1.5
+      threshold: 4.0
+    - name: sensitive_information
+      enabled: true
+      type: guidelines
+      weight: 1.5
+      threshold: 4.0
 
 guardrails:
   enabled: true

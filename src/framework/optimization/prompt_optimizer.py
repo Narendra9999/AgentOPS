@@ -1,26 +1,23 @@
 """
 AgentOPS Framework — Iterative Development
-LLM-as-Judge alignment (MemAlign) and Prompt Optimization (GEPA).
+LLM-as-Judge alignment and Prompt Optimization (MetaPromptOptimizer).
 
-Reference: https://www.databricks.com/blog/self-optimizing-football-chatbot-guided-domain-experts-databricks
-Code ref: https://github.com/WesleyPasfield/at-bat-assistant/tree/main
-
-Uses MLflow 3.4+ APIs:
+Uses MLflow 3.5+ APIs:
   - mlflow.genai.judges.make_judge() — create custom LLM judges
   - judge.align(traces, optimizer) — align judge with expert feedback
-  - GEPAAlignmentOptimizer (default) — LLM reflection, no embeddings needed
-  - MemAlignOptimizer (optional) — requires embedding model (OPENAI_API_KEY)
-  - mlflow.genai.optimize_prompts() — prompt optimization (MLflow >= 3.5)
+  - GEPAAlignmentOptimizer (default) — LLM reflection for judge alignment
+  - MetaPromptOptimizer — restructures prompts using best practices (no GEPA dependency)
+  - mlflow.genai.optimize_prompts() — unified prompt optimization API
 
-Environment setup (required for litellm/DSPy routing on Databricks):
+Environment setup (required for litellm routing on Databricks):
   - DATABRICKS_API_KEY = workspace PAT token
   - DATABRICKS_API_BASE = {host}/serving-endpoints
   - Judge model URI format: "databricks:/<endpoint-name>"
 
 Flow:
   1. Collect domain expert feedback from labeled traces
-  2. Create judge with make_judge() and align with GEPA
-  3. Optimize prompts using GEPA prompt optimizer
+  2. Create judge with make_judge() and align with GEPA alignment optimizer
+  3. Optimize prompts using MetaPromptOptimizer
   4. Evaluate optimized prompt vs baseline
 """
 
@@ -278,7 +275,7 @@ class IterativeOptimizer:
             max_metric_calls: Max evaluations during optimization
         """
         try:
-            from mlflow.genai.optimize import DspyPromptOptimizer
+            from mlflow.genai.optimize import MetaPromptOptimizer
 
             # Use aligned judge as scorer if available, otherwise base judge
             if scorers is None:
@@ -300,14 +297,14 @@ class IterativeOptimizer:
                 formatted = loaded_prompt.format(**kwargs)
                 return formatted
 
-            # Run DSPy MIPROv2 prompt optimization
-            logger.info(f"Starting DSPy MIPROv2 prompt optimization (max_metric_calls={max_metric_calls})")
+            # Run MetaPromptOptimizer — restructures prompts using best practices
+            logger.info(f"Starting MetaPromptOptimizer (reflection_model={self.judge_model})")
             result = mlflow.genai.optimize_prompts(
                 predict_fn=predict_fn,
                 train_data=eval_dataset,
                 prompt_uris=[prompt.uri],
-                optimizer=DspyPromptOptimizer(
-                    max_metric_calls=max_metric_calls,
+                optimizer=MetaPromptOptimizer(
+                    reflection_model=self.judge_model,
                 ),
                 scorers=scorers,
             )

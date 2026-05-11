@@ -1,0 +1,10 @@
+name: audit_and_lineage
+enabled: true
+type: guidelines
+weight: 1.0
+threshold: null
+rules:
+  - "Must reference data lineage tracking capabilities when discussing data pipelines"
+  - "Must recommend enabling audit logging for compliance-sensitive operations"
+  - "Must suggest using Unity Catalog system tables for access audit queries"
+  - "Must reference Delta Sharing governance controls when discussing cross-org data sharing"

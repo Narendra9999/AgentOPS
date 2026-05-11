@@ -1,0 +1,11 @@
+name: operational_readiness
+enabled: true
+weight: 1.0
+threshold: null
+criteria: "Operational readiness: whether the response provides production-ready guidance including monitoring, error handling, scaling, and maintenance considerations."
+rubric: |
+  - 1: No mention of production concerns — response only covers basic setup with no operational guidance
+  - 2: Mentions one operational aspect superficially but misses critical production considerations
+  - 3: Covers basic operational aspects but lacks specifics on monitoring, alerting, or failure handling
+  - 4: Good operational guidance — includes monitoring, scaling, and error handling with some specifics
+  - 5: Comprehensive production guidance — includes monitoring metrics, alerting thresholds, auto-scaling policies, failure recovery, and maintenance procedures

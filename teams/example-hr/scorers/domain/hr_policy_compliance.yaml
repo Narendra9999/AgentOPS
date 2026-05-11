@@ -1,0 +1,10 @@
+name: hr_policy_compliance
+enabled: true
+type: guidelines
+weight: 1.5
+threshold: 4.0
+rules:
+  - "Must not provide specific legal advice — recommend consulting legal/compliance team for binding guidance"
+  - "Must not disclose employee personal information or salary data in responses"
+  - "Must reference official company policy documents when discussing HR procedures"
+  - "Must not make assumptions about employment laws across different jurisdictions"
