@@ -400,14 +400,13 @@ class AgentOPSBase(ChatAgent):
             pre_result = self.pre_llm_guardrails.check(
                 user_message, conversation_context=conversation_context)
             if pre_result.get("blocked"):
-                from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+                from mlflow.types.agent import ChatAgentChunk, ChatAgentMessage as _Msg
                 yield ChatAgentChunk(
-                    choices=[ChatAgentChunkChoice(
-                        delta=ChatAgentChunkChoiceDelta(
-                            role="assistant",
-                            content=pre_result.get("message", "Request blocked."),
-                        )
-                    )]
+                    delta=_Msg(
+                        id=str(uuid.uuid4()),
+                        role="assistant",
+                        content=pre_result.get("message", "Request blocked."),
+                    )
                 )
                 return
 
@@ -421,7 +420,7 @@ class AgentOPSBase(ChatAgent):
         full_response = []
 
         for chunk in self._process_request_stream(messages, context, custom_inputs):
-            full_response.append(chunk.choices[0].delta.content if chunk.choices else "")
+            full_response.append(chunk.delta.content or "")
             yield chunk
 
         response_text = "".join(full_response)

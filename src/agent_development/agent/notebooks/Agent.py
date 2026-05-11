@@ -236,16 +236,15 @@ class DatabricksDocsAgent(AgentOPSBase):
         custom_inputs: Optional[dict] = None,
     ):
         """Streaming version — yields ChatAgentChunk objects token by token."""
-        from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+        from mlflow.types.agent import ChatAgentChunk
 
         augmented_messages, retrieved_docs = self._build_augmented_messages(messages)
         self._request_context["retrieved_docs"] = retrieved_docs
 
-        for chunk in self._call_llm_stream(augmented_messages):
+        msg_id = str(uuid.uuid4())
+        for text in self._call_llm_stream(augmented_messages):
             yield ChatAgentChunk(
-                choices=[ChatAgentChunkChoice(
-                    delta=ChatAgentChunkChoiceDelta(role="assistant", content=chunk)
-                )]
+                delta=ChatAgentMessage(id=msg_id, role="assistant", content=text)
             )
 
 
