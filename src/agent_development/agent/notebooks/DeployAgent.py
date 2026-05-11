@@ -52,18 +52,9 @@ model_name = f"{catalog}.{schema}.{agent_name}"
 # Install dependencies — uses air-gapped volume if available, otherwise PyPI
 import subprocess, os
 
-# Find wheels: bundled (DAB) → Mastercard volume → FEVM volume → PyPI
-_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-_eval_dir = "/Workspace" + os.path.dirname(os.path.dirname(_nb_path))
-_wheels_path = None
-for _candidate in [
-    os.path.join(_eval_dir, "wheels"),
-    "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs",
-    "/Volumes/classic_stable_cykcbe_catalog/agentops/app_wheels",
-]:
-    if os.path.exists(_candidate) and any(f.endswith(".whl") for f in os.listdir(_candidate)):
-        _wheels_path = _candidate
-        break
+# Install from Mastercard volume (air-gapped) or PyPI
+_vol_path = "/Volumes/mc_edacde_shared/datalake_shared/libraries/dip/enc/python/312/python312_all_libs"
+_wheels_path = _vol_path if os.path.exists(_vol_path) else None
 
 if _wheels_path:
     print(f"Installing from: {_wheels_path}")
