@@ -400,6 +400,11 @@ class AgentOPSBase(ChatAgent):
             pre_result = self.pre_llm_guardrails.check(
                 user_message, conversation_context=conversation_context)
             if pre_result.get("blocked"):
+                mlflow.update_current_trace(tags={
+                    "agentops.guardrail.pre_llm.blocked": "true",
+                    "agentops.guardrail.pre_llm.blocked_by": pre_result.get("blocked_by", "unknown"),
+                    "agentops.streaming": "true",
+                })
                 from mlflow.types.agent import ChatAgentChunk, ChatAgentMessage as _Msg
                 yield ChatAgentChunk(
                     delta=_Msg(
@@ -409,6 +414,10 @@ class AgentOPSBase(ChatAgent):
                     )
                 )
                 return
+            mlflow.update_current_trace(tags={
+                "agentops.guardrail.pre_llm.blocked": "false",
+                "agentops.guardrail.pre_llm.intent": pre_result.get("checks", {}).get("intent", {}).get("intent", "unknown"),
+            })
 
         # ── Recall long-term memory ──
         if self.session_store.memory_enabled and user_id and user_message:
@@ -426,12 +435,19 @@ class AgentOPSBase(ChatAgent):
         response_text = "".join(full_response)
 
         # ── Post-LLM Guardrails ──
+        # Runs after full response is assembled. Can't un-stream tokens already
+        # sent, but tags the trace for monitoring/alerting and logs the violation.
         if self.guardrails_enabled:
             post_result = self.post_llm_guardrails.check(
                 user_message, response_text, self._request_context)
             if post_result.get("blocked"):
+                mlflow.update_current_trace(tags={
+                    "agentops.guardrail.post_llm.blocked": "true",
+                    "agentops.guardrail.post_llm.blocked_by": post_result.get("blocked_by", "unknown"),
+                })
                 logger.warning(f"Post-LLM guardrail blocked streamed response: {post_result.get('blocked_by')}")
-                # Can't un-stream — log the block for monitoring
+            else:
+                mlflow.update_current_trace(tags={"agentops.guardrail.post_llm.blocked": "false"})
 
         # ── Save session history ──
         latency_ms = (time.time() - start_time) * 1000
