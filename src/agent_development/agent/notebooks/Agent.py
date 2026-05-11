@@ -106,7 +106,7 @@ class DatabricksDocsAgent(AgentOPSBase):
 
     @mlflow.trace(span_type="LLM")
     def _call_llm(self, messages: list[dict]) -> str:
-        """Call the LLM endpoint."""
+        """Call the LLM endpoint (non-streaming)."""
         from databricks.sdk import WorkspaceClient
         from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
 
@@ -135,6 +135,49 @@ class DatabricksDocsAgent(AgentOPSBase):
             ]
             content = "\n".join(text_parts) if text_parts else str(content)
         return content
+
+    def _call_llm_stream(self, messages: list[dict]):
+        """Stream LLM response token by token. Yields content chunks."""
+        import requests as _requests
+        import json as _json
+        from databricks.sdk import WorkspaceClient
+
+        w = WorkspaceClient()
+        token = w.config.token
+        host = w.config.host.rstrip("/")
+
+        body = {
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "stream": True,
+        }
+
+        resp = _requests.post(
+            f"{host}/serving-endpoints/{self.llm_endpoint}/invocations",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=body,
+            stream=True,
+            timeout=300,
+        )
+        resp.raise_for_status()
+
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            line = line.decode("utf-8")
+            if line.startswith("data: "):
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = _json.loads(data_str)
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
+                except (_json.JSONDecodeError, IndexError):
+                    continue
 
     @mlflow.trace(span_type="CHAIN")
     def _process_request(
@@ -179,6 +222,56 @@ class DatabricksDocsAgent(AgentOPSBase):
         return ChatAgentResponse(
             messages=[ChatAgentMessage(
                 id=str(uuid.uuid4()), role="assistant", content=response_text)])
+
+    def _build_augmented_messages(self, messages):
+        """Build the augmented prompt (shared between predict and predict_stream)."""
+        recent_user_msgs = [
+            m.content for m in messages if m.role == "user"
+        ][-self.max_retrieval_turns:]
+        retrieval_query = " ".join(recent_user_msgs)
+
+        context_text, retrieved_docs = self._retrieve_context(retrieval_query)
+
+        augmented_messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": f"Documentation Context:\n\n{context_text}"},
+        ]
+
+        user_memories = self._request_context.get("user_memories", [])
+        if user_memories:
+            memory_lines = [f"  [{m['key']}]: {m['content']}" for m in user_memories]
+            memory_text = "User context from prior sessions:\n" + "\n".join(memory_lines)
+            augmented_messages.append({"role": "system", "content": memory_text})
+
+        history = messages[-self.max_history_turns:] if len(messages) > self.max_history_turns else messages
+        for msg in history:
+            augmented_messages.append({"role": msg.role, "content": msg.content})
+
+        return augmented_messages, retrieved_docs
+
+    @mlflow.trace(span_type="CHAIN")
+    def _process_request_stream(
+        self,
+        messages: list[ChatAgentMessage],
+        context: Optional[dict] = None,
+        custom_inputs: Optional[dict] = None,
+    ):
+        """Streaming version — yields ChatAgentChunk objects token by token."""
+        from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+
+        augmented_messages, retrieved_docs = self._build_augmented_messages(messages)
+        self._request_context["retrieved_docs"] = retrieved_docs
+
+        # Stream tokens from LLM
+        for chunk in self._call_llm_stream(augmented_messages):
+            yield ChatAgentChunk(
+                choices=[ChatAgentChunkChoice(
+                    delta=ChatAgentChunkChoiceDelta(
+                        role="assistant",
+                        content=chunk,
+                    )
+                )]
+            )
 
 
 # MLflow ChatAgent entry point

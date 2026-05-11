@@ -344,3 +344,117 @@ class AgentOPSBase(ChatAgent):
     ) -> ChatAgentResponse:
         """Override this in your agent subclass."""
         raise NotImplementedError("Subclasses must implement _process_request")
+
+    def _process_request_stream(
+        self,
+        messages: list[ChatAgentMessage],
+        context: Optional[dict] = None,
+        custom_inputs: Optional[dict] = None,
+    ):
+        """Override this for streaming support. Yields ChatAgentChunk objects."""
+        raise NotImplementedError("Subclasses must implement _process_request_stream for streaming")
+
+    @mlflow.trace(span_type="AGENT")
+    def predict_stream(
+        self,
+        messages: list[ChatAgentMessage],
+        context: Optional[dict] = None,
+        custom_inputs: Optional[dict] = None,
+    ):
+        """
+        Streaming prediction — same pre/post processing as predict(),
+        but yields chunks as the LLM generates tokens.
+
+        Pre-processing (history, guardrails, memory) runs fully before streaming.
+        Post-processing (guardrails, save history) runs after streaming completes.
+        """
+        start_time = time.time()
+        user_message = messages[-1].content if messages else ""
+        self._request_context = {}
+
+        # Extract thread_id, user_id
+        request_tags = {}
+        thread_id = ""
+        user_id = ""
+        if custom_inputs and isinstance(custom_inputs, dict):
+            request_tags = custom_inputs.get("tags", {})
+            thread_id = custom_inputs.get("thread_id", custom_inputs.get("session_id", ""))
+            user_id = custom_inputs.get("user_id", "")
+        if not thread_id:
+            thread_id = str(uuid.uuid4())
+        self._set_trace_tags(request_tags)
+
+        # ── Load session history ──
+        has_client_history = len(messages) > 1
+        conversation_context = ""
+        if self.session_store.enabled and thread_id and not has_client_history:
+            self._load_session_history(thread_id, messages)
+            messages = self._augmented_messages
+            if len(messages) > 1:
+                conversation_context = " ".join(
+                    m.content for m in messages[:-1] if hasattr(m, "role") and m.role == "user"
+                )
+
+        # ── Pre-LLM Guardrails ──
+        if self.guardrails_enabled:
+            pre_result = self.pre_llm_guardrails.check(
+                user_message, conversation_context=conversation_context)
+            if pre_result.get("blocked"):
+                from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+                yield ChatAgentChunk(
+                    choices=[ChatAgentChunkChoice(
+                        delta=ChatAgentChunkChoiceDelta(
+                            role="assistant",
+                            content=pre_result.get("message", "Request blocked."),
+                        )
+                    )]
+                )
+                return
+
+        # ── Recall long-term memory ──
+        if self.session_store.memory_enabled and user_id and user_message:
+            self._recall_long_term_memory(user_id, user_message)
+
+        # ── Stream agent response ──
+        self._request_context["thread_id"] = thread_id
+        self._request_context["user_id"] = user_id
+        full_response = []
+
+        for chunk in self._process_request_stream(messages, context, custom_inputs):
+            full_response.append(chunk.choices[0].delta.content if chunk.choices else "")
+            yield chunk
+
+        response_text = "".join(full_response)
+
+        # ── Post-LLM Guardrails ──
+        if self.guardrails_enabled:
+            post_result = self.post_llm_guardrails.check(
+                user_message, response_text, self._request_context)
+            if post_result.get("blocked"):
+                logger.warning(f"Post-LLM guardrail blocked streamed response: {post_result.get('blocked_by')}")
+                # Can't un-stream — log the block for monitoring
+
+        # ── Save session history ──
+        latency_ms = (time.time() - start_time) * 1000
+        if self.session_store.enabled:
+            trace_id = ""
+            try:
+                trace = mlflow.get_current_active_span()
+                trace_id = trace.request_id if trace else ""
+            except Exception:
+                pass
+            model_endpoint = getattr(self, "llm_endpoint", "")
+            self.session_store.save_full_session(
+                session_id=thread_id,
+                messages=messages,
+                response_text=response_text,
+                response_time_ms=latency_ms,
+                model_endpoint=model_endpoint,
+                trace_id=trace_id,
+            )
+
+        mlflow.update_current_trace(tags={
+            "agentops.latency_ms": str(round(latency_ms, 2)),
+            "agentops.status": "success",
+            "agentops.streaming": "true",
+        })
