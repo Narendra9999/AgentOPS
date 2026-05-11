@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 06 — Prompt Optimization with DSPy MIPROv2
-# MAGIC Runs DSPy MIPROv2 iterative prompt optimization using the aligned judge as the metric.
+# MAGIC # 06 — Prompt Optimization with GEPA
+# MAGIC Runs GEPA prompt optimization using the aligned judge from notebook 05 as the scorer.
 # MAGIC
 # MAGIC **Prerequisites:**
 # MAGIC - Aligned judge registered (from 05_JudgeAlignment)
@@ -10,11 +10,10 @@
 # MAGIC **What this notebook does:**
 # MAGIC 1. Loads the aligned judge from the experiment
 # MAGIC 2. Loads the current system prompt from config / MLflow Prompt Registry
-# MAGIC 3. Configures DSPy with Databricks LLM endpoint
-# MAGIC 4. Runs MIPROv2 iterative optimization (generates candidates, evaluates, selects best)
-# MAGIC 5. Registers the best prompt in MLflow Prompt Registry
+# MAGIC 3. Runs N GEPA optimization rounds, checkpointing results to Delta
+# MAGIC 4. Selects the best prompt and registers it in the MLflow Prompt Registry
 # MAGIC
-# MAGIC **Optimizer:** DSPy MIPROv2 (iterative, multi-round — no GEPA dependency)
+# MAGIC **Reference:** Notebook 06-PromptOptimization from at-bat-assistant
 
 # COMMAND ----------
 
@@ -22,23 +21,19 @@ dbutils.widgets.text("agent_name", "databricks_docs_agent")
 dbutils.widgets.text("catalog", "classic_stable_cykcbe_catalog")
 dbutils.widgets.text("schema", "agentops")
 dbutils.widgets.text("audit_schema", "agentops_audit")
-dbutils.widgets.text("llm_endpoint", "databricks-gpt-oss-120b")
 dbutils.widgets.text("judge_model", "databricks-meta-llama-3-3-70b-instruct")
 dbutils.widgets.text("aligned_judge_name", "response_quality_aligned")
-dbutils.widgets.text("num_candidates", "7")
-dbutils.widgets.text("max_bootstrapped_demos", "3")
-dbutils.widgets.text("max_labeled_demos", "5")
+dbutils.widgets.text("n_runs", "3")
+dbutils.widgets.text("max_metric_calls", "100")
 
 agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
 audit_schema = dbutils.widgets.get("audit_schema")
-llm_endpoint = dbutils.widgets.get("llm_endpoint")
 judge_model = dbutils.widgets.get("judge_model")
 aligned_judge_name = dbutils.widgets.get("aligned_judge_name")
-NUM_CANDIDATES = int(dbutils.widgets.get("num_candidates"))
-MAX_BOOTSTRAPPED_DEMOS = int(dbutils.widgets.get("max_bootstrapped_demos"))
-MAX_LABELED_DEMOS = int(dbutils.widgets.get("max_labeled_demos"))
+N_RUNS = int(dbutils.widgets.get("n_runs"))
+MAX_METRIC_CALLS = int(dbutils.widgets.get("max_metric_calls"))
 
 # COMMAND ----------
 
@@ -55,10 +50,10 @@ _wheels_path = _vol_path if os.path.exists(_vol_path) else None
 
 if _wheels_path:
     print(f"Installing from: {_wheels_path}")
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "--find-links", _wheels_path, "--no-index", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents", "mlflow", "dspy", "gepa", "--find-links", _wheels_path, "--no-index", "-q"])
 else:
     print("Installing from PyPI...")
-    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.5", "dspy>=2.6", "-q"])
+    subprocess.check_call(["pip", "install", "-U", "databricks-agents>=1.2.0", "mlflow[genai]>=3.5", "dspy>=2.6", "gepa", "-q"])
 dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -68,12 +63,10 @@ agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
 audit_schema = dbutils.widgets.get("audit_schema")
-llm_endpoint = dbutils.widgets.get("llm_endpoint")
 judge_model = dbutils.widgets.get("judge_model")
 aligned_judge_name = dbutils.widgets.get("aligned_judge_name")
-NUM_CANDIDATES = int(dbutils.widgets.get("num_candidates"))
-MAX_BOOTSTRAPPED_DEMOS = int(dbutils.widgets.get("max_bootstrapped_demos"))
-MAX_LABELED_DEMOS = int(dbutils.widgets.get("max_labeled_demos"))
+N_RUNS = int(dbutils.widgets.get("n_runs"))
+MAX_METRIC_CALLS = int(dbutils.widgets.get("max_metric_calls"))
 
 # COMMAND ----------
 
@@ -100,8 +93,9 @@ os.environ["DATABRICKS_API_BASE"] = f"{_ws_url}/serving-endpoints"
 os.environ["DATABRICKS_HOST"] = _ws_url
 os.environ["DATABRICKS_TOKEN"] = _token
 
+REFLECTION_MODEL = f"databricks:/{judge_model}"
 PROMPT_NAME = f"{catalog}.{schema}.{agent_name}_system_prompt"
-CHECKPOINT_TABLE = f"{catalog}.{schema}.dspy_mipro_checkpoint"
+CHECKPOINT_TABLE = f"{catalog}.{schema}.gepa_experiment_checkpoint"
 
 # Set experiment
 _user = spark.sql("SELECT current_user()").first()[0]
@@ -109,10 +103,10 @@ experiment = mlflow.set_experiment(f"/Users/{_user}/{agent_name}")
 EXPERIMENT_ID = experiment.experiment_id
 
 print(f"Experiment: {experiment.name} (ID: {EXPERIMENT_ID})")
-print(f"LLM endpoint: {llm_endpoint}")
-print(f"Judge model: {judge_model}")
+print(f"Reflection model: {REFLECTION_MODEL}")
 print(f"Prompt name: {PROMPT_NAME}")
-print(f"MIPROv2 config: {NUM_CANDIDATES} candidates, {MAX_BOOTSTRAPPED_DEMOS} bootstrapped demos, {MAX_LABELED_DEMOS} labeled demos")
+print(f"Checkpoint table: {CHECKPOINT_TABLE}")
+print(f"Optimization: {N_RUNS} runs, max {MAX_METRIC_CALLS} metric calls each")
 
 # COMMAND ----------
 
@@ -159,6 +153,11 @@ try:
 except Exception as e:
     print(f"  Dummy call: {type(e).__name__} (episodic memory should be initialized)")
 
+if hasattr(aligned_judge, "_semantic_memory") and aligned_judge._semantic_memory:
+    print(f"  Semantic memory: {len(aligned_judge._semantic_memory)} guidelines")
+if hasattr(aligned_judge, "_episodic_memory") and aligned_judge._episodic_memory:
+    print(f"  Episodic memory: {len(aligned_judge._episodic_memory)} examples")
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -172,332 +171,246 @@ with open(f"/Workspace/{nb_root}/agent/config.yaml") as f:
     _cfg = yaml.safe_load(f)
 current_prompt = _cfg.get("system_prompt", "")
 print(f"Loaded prompt from config.yaml ({len(current_prompt)} chars)")
+
+# Try to register in Prompt Registry (optional — may not be available on all workspaces)
+_prompt_registered = False
+try:
+    _prompt_obj = mlflow.genai.register_prompt(
+        name=PROMPT_NAME, template=current_prompt,
+        commit_message="Initial prompt from config.yaml",
+    )
+    _prompt_registered = True
+    print(f"Registered prompt: {PROMPT_NAME}")
+except Exception as e:
+    print(f"Prompt Registry not available: {e}")
+    print("Will run GEPA without Prompt Registry (using direct prompt text)")
+
+print(f"Prompt length: {len(current_prompt)} chars")
 print(current_prompt[:300] + "...")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Load evaluation dataset and convert to DSPy format
+# MAGIC ## 4. Load evaluation dataset
 
 # COMMAND ----------
 
 import pandas as pd
-import dspy
 
 golden_table = f"{catalog}.{schema}.eval_golden_dataset"
 eval_df = spark.table(golden_table).toPandas()
 print(f"Evaluation dataset: {len(eval_df)} rows from {golden_table}")
 
-# Convert to DSPy Examples
-dspy_trainset = []
+# Convert to format for GEPA: list of dicts with 'inputs' and 'expectations'
+eval_data = []
 for _, row in eval_df.iterrows():
-    question = row.get("request", row.get("input", ""))
+    query = row.get("request", row.get("input", ""))
     expected = row.get("expected_response", row.get("output", ""))
-    ex = dspy.Example(question=question, expected_answer=expected).with_inputs("question")
-    dspy_trainset.append(ex)
+    entry = {"inputs": {"input": [{"role": "user", "content": query}]}}
+    if expected:
+        entry["expectations"] = {"expected_response": expected}
+    eval_data.append(entry)
 
-print(f"Converted to DSPy trainset: {len(dspy_trainset)} examples")
-print(f"Sample: {dspy_trainset[0].question[:80]}...")
+print(f"Converted to GEPA format: {len(eval_data)} rows")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Configure DSPy with Databricks LLM
+# MAGIC ## 5. Define predict function
 
 # COMMAND ----------
 
-# Configure DSPy to route through Databricks FMAPI
-lm = dspy.LM(
-    f"databricks/{llm_endpoint}",
-    api_base=f"{_ws_url}/serving-endpoints",
-    api_key=_token,
-    max_tokens=1024,
-    temperature=0.1,
-)
-dspy.configure(lm=lm)
-print(f"DSPy configured with: databricks/{llm_endpoint}")
+import requests as _requests
+
+def predict_fn(**kwargs):
+    """Query the deployed agent endpoint with the optimized prompt."""
+    inputs = kwargs.get("input", kwargs.get("inputs", []))
+    if isinstance(inputs, dict):
+        inputs = inputs.get("input", [])
+
+    system_prompt = current_prompt
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if isinstance(inputs, list):
+        messages.extend(inputs)
+    else:
+        messages.append({"role": "user", "content": str(inputs)})
+
+    # Call via SDK api_client (handles auth internally, supports plain dict messages)
+    from databricks.sdk import WorkspaceClient
+    _w = WorkspaceClient()
+    result = _w.api_client.do(
+        "POST",
+        f"/serving-endpoints/{judge_model}/invocations",
+        body={"messages": messages, "max_tokens": 1024, "temperature": 0.1},
+    )
+    return result["choices"][0]["message"]["content"]
 
 # Quick validation
-_test_pred = lm("What is Delta Lake? Answer in one sentence.")
-print(f"LM validation: {str(_test_pred)[:200]}")
+_test = predict_fn(input=[{"role": "user", "content": "What is Delta Lake?"}])
+print(f"Predict function validated ({len(_test)} chars)")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Define DSPy module and metric
-
-# COMMAND ----------
-
-class DocsQA(dspy.Module):
-    """DSPy module that wraps our documentation QA agent for optimization."""
-
-    def __init__(self, system_prompt):
-        super().__init__()
-        # The signature defines the task — MIPROv2 will optimize the instructions
-        self.generate = dspy.ChainOfThought(
-            dspy.Signature(
-                "question -> answer",
-                instructions=system_prompt,
-            )
-        )
-
-    def forward(self, question):
-        return self.generate(question=question)
-
-
-def eval_metric(example, prediction, trace=None):
-    """Evaluate a prediction using the aligned judge.
-
-    Returns True/False for MIPROv2's optimization loop.
-    """
-    try:
-        score = aligned_judge(
-            inputs={"input": [{"role": "user", "content": example.question}]},
-            outputs={"response": prediction.answer},
-        )
-        # aligned_judge returns bool or numeric — normalize to bool
-        if isinstance(score, bool):
-            return score
-        if isinstance(score, (int, float)):
-            return score > 0.5
-        # Handle dict-like score objects
-        val = getattr(score, "value", score)
-        if isinstance(val, bool):
-            return val
-        return bool(val)
-    except Exception as e:
-        print(f"  Metric error: {e}")
-        return False
-
-
-# Validate metric with one example
-_agent = DocsQA(system_prompt=current_prompt)
-_pred = _agent(question=dspy_trainset[0].question)
-_score = eval_metric(dspy_trainset[0], _pred)
-print(f"Metric validation: question='{dspy_trainset[0].question[:50]}...', score={_score}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 7. Run MIPROv2 optimization
+# MAGIC ## 6. Run GEPA optimization rounds
 # MAGIC
-# MAGIC MIPROv2 iteratively:
-# MAGIC 1. Generates candidate instruction variations
-# MAGIC 2. Bootstraps few-shot demonstrations from your eval data
-# MAGIC 3. Evaluates each candidate against the metric
-# MAGIC 4. Selects the best-performing combination of instructions + demos
+# MAGIC Each run produces a candidate prompt. Results are checkpointed to a Delta table
+# MAGIC so optimization can be resumed if interrupted.
 
 # COMMAND ----------
 
-from dspy.teleprompt import MIPROv2
+from mlflow.genai.optimize import GepaPromptOptimizer
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
 import time
 
-agent = DocsQA(system_prompt=current_prompt)
-
-# Evaluate baseline before optimization
-print("=== Baseline Evaluation ===")
-baseline_scores = []
-for ex in dspy_trainset:
-    try:
-        pred = agent(question=ex.question)
-        score = eval_metric(ex, pred)
-        baseline_scores.append(1.0 if score else 0.0)
-    except Exception:
-        baseline_scores.append(0.0)
-baseline_score = sum(baseline_scores) / len(baseline_scores) if baseline_scores else 0.0
-print(f"Baseline score: {baseline_score:.3f} ({sum(baseline_scores):.0f}/{len(baseline_scores)} passed)")
-
-# COMMAND ----------
-
-print(f"\n{'=' * 60}")
-print(f"  MIPROv2 Optimization")
-print(f"  Candidates: {NUM_CANDIDATES} | Bootstrapped demos: {MAX_BOOTSTRAPPED_DEMOS} | Labeled demos: {MAX_LABELED_DEMOS}")
-print(f"{'=' * 60}\n")
-
-t0 = time.time()
-
-optimizer = MIPROv2(
-    metric=eval_metric,
-    auto=None,
-    num_candidates=NUM_CANDIDATES,
-    num_threads=2,
-    verbose=True,
-)
-
-with mlflow.start_run(run_name="dspy_mipro_optimization"):
-    mlflow.log_params({
-        "optimizer": "MIPROv2",
-        "num_candidates": NUM_CANDIDATES,
-        "max_bootstrapped_demos": MAX_BOOTSTRAPPED_DEMOS,
-        "max_labeled_demos": MAX_LABELED_DEMOS,
-        "trainset_size": len(dspy_trainset),
-        "llm_endpoint": llm_endpoint,
-        "judge_model": judge_model,
-        "baseline_score": baseline_score,
-    })
-
-    optimized_agent = optimizer.compile(
-        agent,
-        trainset=dspy_trainset,
-        num_trials=NUM_CANDIDATES * 2,
-        max_bootstrapped_demos=MAX_BOOTSTRAPPED_DEMOS,
-        max_labeled_demos=MAX_LABELED_DEMOS,
-        minibatch=False,
-    )
-
-    elapsed = time.time() - t0
-    print(f"\nOptimization completed in {elapsed:.0f}s")
-
-    # Evaluate optimized agent
-    print("\n=== Optimized Agent Evaluation ===")
-    optimized_scores = []
-    for ex in dspy_trainset:
-        try:
-            pred = optimized_agent(question=ex.question)
-            score = eval_metric(ex, pred)
-            optimized_scores.append(1.0 if score else 0.0)
-        except Exception:
-            optimized_scores.append(0.0)
-    optimized_score = sum(optimized_scores) / len(optimized_scores) if optimized_scores else 0.0
-
-    mlflow.log_metrics({
-        "baseline_score": baseline_score,
-        "optimized_score": optimized_score,
-        "improvement": optimized_score - baseline_score,
-        "optimization_time_s": elapsed,
-    })
-
-    print(f"Baseline:  {baseline_score:.3f}")
-    print(f"Optimized: {optimized_score:.3f}")
-    print(f"Lift:      {optimized_score - baseline_score:+.3f}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## 8. Extract optimized prompt and register
-
-# COMMAND ----------
-
-# Extract the optimized instructions from the compiled DSPy module
-# DSPy versions differ — try multiple access patterns
-_gen = optimized_agent.generate
-optimized_instructions = None
-for attr_path in ["signature.instructions", "extended_signature.instructions", "predict.signature.instructions"]:
-    obj = _gen
-    try:
-        for part in attr_path.split("."):
-            obj = getattr(obj, part)
-        optimized_instructions = obj
-        print(f"Extracted instructions via: generate.{attr_path}")
-        break
-    except AttributeError:
-        continue
-
-if optimized_instructions is None:
-    # Fallback: inspect all attributes for an instructions string
-    for attr_name in dir(_gen):
-        obj = getattr(_gen, attr_name, None)
-        if hasattr(obj, "instructions"):
-            optimized_instructions = obj.instructions
-            print(f"Extracted instructions via: generate.{attr_name}.instructions")
-            break
-
-if optimized_instructions is None:
-    print("WARNING: Could not extract optimized instructions from DSPy module")
-    print(f"Available attributes: {[a for a in dir(_gen) if not a.startswith('_')]}")
-    optimized_instructions = current_prompt  # fallback to original
-
-optimized_demos = []
-
-# Extract few-shot demonstrations if any were selected
-for demo_attr in ["demos", "compiled_demos"]:
-    demos_list = getattr(_gen, demo_attr, None)
-    if demos_list:
-        for demo in demos_list:
-            optimized_demos.append({
-                "question": getattr(demo, "question", ""),
-                "answer": getattr(demo, "answer", ""),
-            })
-        print(f"Extracted {len(optimized_demos)} demos via: generate.{demo_attr}")
-        break
-
-print(f"Optimized instructions ({len(optimized_instructions)} chars):")
-print(optimized_instructions[:500] + "...")
-print(f"\nFew-shot demos: {len(optimized_demos)}")
-
-# Build final prompt — instructions + demos as examples
-final_prompt = optimized_instructions
-if optimized_demos:
-    examples_text = "\n\nHere are some example interactions:\n"
-    for i, demo in enumerate(optimized_demos, 1):
-        examples_text += f"\nExample {i}:\nUser: {demo['question']}\nAssistant: {demo['answer'][:300]}\n"
-    final_prompt += examples_text
-
-print(f"\nFinal prompt length: {len(final_prompt)} chars")
-
-# COMMAND ----------
-
-# Checkpoint results to Delta
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType
-
+# Checkpoint schema
 _checkpoint_schema = StructType([
-    StructField("optimizer", StringType()),
-    StructField("baseline_score", DoubleType()),
-    StructField("optimized_score", DoubleType()),
-    StructField("improvement", DoubleType()),
+    StructField("agent_type", StringType()),
+    StructField("run_idx", IntegerType()),
+    StructField("initial_score", DoubleType()),
+    StructField("final_score", DoubleType()),
     StructField("prompt_template", StringType()),
-    StructField("num_demos", DoubleType()),
     StructField("elapsed_seconds", DoubleType()),
 ])
 
-checkpoint_row = {
-    "optimizer": "MIPROv2",
-    "baseline_score": baseline_score,
-    "optimized_score": optimized_score,
-    "improvement": optimized_score - baseline_score,
-    "prompt_template": final_prompt,
-    "num_demos": float(len(optimized_demos)),
-    "elapsed_seconds": round(elapsed, 1),
-}
-spark.createDataFrame([checkpoint_row], schema=_checkpoint_schema).write.mode("append").saveAsTable(CHECKPOINT_TABLE)
-print(f"Checkpointed to {CHECKPOINT_TABLE}")
+# Load existing checkpoints (resume support)
+results = []
+if spark.catalog.tableExists(CHECKPOINT_TABLE):
+    _checkpoint_df = spark.table(CHECKPOINT_TABLE)
+    results = [row.asDict() for row in _checkpoint_df.collect()]
+    print(f"Loaded {len(results)} existing checkpoint rows")
+
+completed_runs = {r["run_idx"] for r in results if r["agent_type"] == "base"}
+print(f"Completed runs: {completed_runs}")
+print(f"Remaining runs: {set(range(N_RUNS)) - completed_runs}")
 
 # COMMAND ----------
 
-# Register in MLflow Prompt Registry (if improvement > 0)
-if optimized_score > baseline_score:
+# Run GEPA optimization
+# Ensure prompt is registered (needed for optimize_prompts)
+if not _prompt_registered:
     try:
-        new_prompt = mlflow.genai.register_prompt(
-            name=PROMPT_NAME,
-            template=final_prompt,
-            commit_message=(
-                f"DSPy MIPROv2 optimized prompt "
-                f"(score: {baseline_score:.3f} -> {optimized_score:.3f}, "
-                f"+{optimized_score - baseline_score:.3f}, "
-                f"demos: {len(optimized_demos)}, judge: {aligned_judge_name})"
-            ),
-            tags={"experiment": "dspy_mipro", "optimizer": "MIPROv2"},
-        )
-        print(f"Registered optimized prompt: {PROMPT_NAME} (version {new_prompt.version})")
-
-        # Update production alias
-        mlflow.genai.set_prompt_alias(
-            name=PROMPT_NAME,
-            alias="production",
-            version=new_prompt.version,
-        )
-        print(f"Updated @production alias -> v{new_prompt.version}")
+        _prompt_obj = mlflow.genai.register_prompt(name=PROMPT_NAME, template=current_prompt)
+        _prompt_registered = True
+        print(f"Registered prompt: {PROMPT_NAME} (uri={_prompt_obj.uri})")
     except Exception as e:
-        print(f"Could not register prompt: {e}")
-        print("Prompt text saved to checkpoint table — register manually if needed.")
-else:
-    print(f"No improvement (baseline={baseline_score:.3f}, optimized={optimized_score:.3f})")
-    print("Keeping current prompt. Optimized prompt saved to checkpoint table for review.")
+        print(f"Cannot register prompt for GEPA: {e}")
+        print("GEPA optimization requires Prompt Registry. Skipping.")
+        import json
+        dbutils.notebook.exit(json.dumps({"status": "skipped", "reason": "Prompt Registry unavailable"}))
+
+# Use version number (not 'latest') to load prompt
+prompt_uri = f"prompts:/{PROMPT_NAME}/1"
+print(f"Prompt URI for GEPA: {prompt_uri}")
+
+for run_idx in range(N_RUNS):
+    if run_idx in completed_runs:
+        print(f"\n[Run {run_idx}] Already completed — skipping")
+        continue
+
+    print(f"\n{'=' * 60}")
+    print(f"  GEPA Run {run_idx + 1}/{N_RUNS}")
+    print(f"{'=' * 60}")
+
+    t0 = time.time()
+    try:
+        result = mlflow.genai.optimize_prompts(
+            predict_fn=predict_fn,
+            train_data=eval_data,
+            prompt_uris=[prompt_uri],
+            optimizer=GepaPromptOptimizer(
+                reflection_model=REFLECTION_MODEL,
+                max_metric_calls=MAX_METRIC_CALLS,
+            ),
+            scorers=[aligned_judge],
+        )
+
+        elapsed = time.time() - t0
+        optimized_prompt = result.optimized_prompts[0]
+
+        row = {
+            "agent_type": "base",
+            "run_idx": run_idx,
+            "initial_score": float(result.initial_eval_score),
+            "final_score": float(result.final_eval_score),
+            "prompt_template": optimized_prompt.template,
+            "elapsed_seconds": round(elapsed, 1),
+        }
+        results.append(row)
+
+        # Checkpoint to Delta
+        spark.createDataFrame([row], schema=_checkpoint_schema).write.mode("append").saveAsTable(CHECKPOINT_TABLE)
+
+        print(f"  Initial: {result.initial_eval_score:.4f}")
+        print(f"  Final:   {result.final_eval_score:.4f}")
+        print(f"  Lift:    {result.final_eval_score / max(result.initial_eval_score, 0.001):.2f}x")
+        print(f"  Time:    {elapsed:.0f}s")
+
+    except Exception as e:
+        print(f"  Run {run_idx} failed: {e}")
+        elapsed = time.time() - t0
+        results.append({
+            "agent_type": "base", "run_idx": run_idx,
+            "initial_score": None, "final_score": None,
+            "prompt_template": None, "elapsed_seconds": round(elapsed, 1),
+        })
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 9. Audit logging
+# MAGIC ## 7. Select best prompt and register
+
+# COMMAND ----------
+
+import pandas as pd
+
+phase_results = [r for r in results if r["agent_type"] == "base" and r["final_score"] is not None]
+
+if not phase_results:
+    print("No successful optimization runs. Cannot select best prompt.")
+    dbutils.notebook.exit(json.dumps({"status": "no_results"}))
+
+best_run = max(phase_results, key=lambda r: r["final_score"] or 0)
+best_prompt_text = best_run["prompt_template"]
+
+gepa_df = pd.DataFrame(phase_results)
+gepa_df["lift"] = gepa_df["final_score"] / gepa_df["initial_score"].clip(lower=0.001)
+
+print("GEPA OPTIMIZATION RESULTS")
+print("=" * 90)
+print(gepa_df[["run_idx", "initial_score", "final_score", "lift", "elapsed_seconds"]].to_string(index=False, float_format="%.4f"))
+
+print(f"\n  Initial mean (1-5): {gepa_df['initial_score'].mean() * 5:.2f}")
+print(f"  Final mean (1-5):   {gepa_df['final_score'].mean() * 5:.2f}")
+print(f"  Best run: {best_run['run_idx']} (score: {best_run['initial_score']:.3f} -> {best_run['final_score']:.3f})")
+
+# Register best prompt
+new_prompt = mlflow.genai.register_prompt(
+    name=PROMPT_NAME,
+    template=best_prompt_text,
+    commit_message=(
+        f"Best prompt from GEPA (run={best_run['run_idx']}, "
+        f"score: {best_run['initial_score']:.3f} -> {best_run['final_score']:.3f}, "
+        f"judge: {aligned_judge_name})"
+    ),
+    tags={"experiment": "gepa_optimization", "run_idx": str(best_run["run_idx"])},
+)
+print(f"\nRegistered optimized prompt: {PROMPT_NAME} (version {new_prompt.version})")
+print(f"First 300 chars:\n{best_prompt_text[:300]}...")
+
+# Update production alias to point to the optimized prompt
+mlflow.genai.set_prompt_alias(
+    name=PROMPT_NAME,
+    alias="production",
+    version=new_prompt.version,
+)
+print(f"Updated @production alias → v{new_prompt.version}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 8. Audit logging
 
 # COMMAND ----------
 
@@ -510,16 +423,13 @@ pipeline = PipelineStepLogger(
 )
 pipeline.start()
 
-step = pipeline.start_step("dspy_mipro_optimization", step_order=1, step_type="optimization")
-pipeline.end_step(step, status="COMPLETED", records_processed=len(dspy_trainset), output_summary={
-    "optimizer": "MIPROv2",
-    "num_candidates": NUM_CANDIDATES,
-    "max_bootstrapped_demos": MAX_BOOTSTRAPPED_DEMOS,
-    "max_labeled_demos": MAX_LABELED_DEMOS,
-    "baseline_score": baseline_score,
-    "optimized_score": optimized_score,
-    "improvement": optimized_score - baseline_score,
-    "num_demos": len(optimized_demos),
+step = pipeline.start_step("gepa_optimization", step_order=1, step_type="optimization")
+pipeline.end_step(step, status="COMPLETED", records_processed=len(eval_data), output_summary={
+    "n_runs": N_RUNS,
+    "max_metric_calls": MAX_METRIC_CALLS,
+    "best_run": best_run["run_idx"],
+    "initial_score": best_run["initial_score"],
+    "final_score": best_run["final_score"],
     "prompt_name": PROMPT_NAME,
     "checkpoint_table": CHECKPOINT_TABLE,
 })
@@ -528,9 +438,8 @@ pipeline.end(status="COMPLETED")
 
 dbutils.notebook.exit(json.dumps({
     "status": "completed",
-    "optimizer": "MIPROv2",
-    "baseline_score": baseline_score,
-    "optimized_score": optimized_score,
-    "improvement": optimized_score - baseline_score,
+    "best_run": best_run["run_idx"],
+    "initial_score": best_run["initial_score"],
+    "final_score": best_run["final_score"],
     "prompt_name": PROMPT_NAME,
 }))

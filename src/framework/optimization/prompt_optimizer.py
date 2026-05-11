@@ -1,23 +1,26 @@
 """
 AgentOPS Framework — Iterative Development
-LLM-as-Judge alignment and Prompt Optimization (MetaPromptOptimizer).
+LLM-as-Judge alignment (MemAlign) and Prompt Optimization (GEPA).
+
+Reference: https://www.databricks.com/blog/self-optimizing-football-chatbot-guided-domain-experts-databricks
+Code ref: https://github.com/WesleyPasfield/at-bat-assistant/tree/main
 
 Uses MLflow 3.5+ APIs:
   - mlflow.genai.judges.make_judge() — create custom LLM judges
   - judge.align(traces, optimizer) — align judge with expert feedback
-  - GEPAAlignmentOptimizer (default) — LLM reflection for judge alignment
-  - MetaPromptOptimizer — restructures prompts using best practices (no GEPA dependency)
-  - mlflow.genai.optimize_prompts() — unified prompt optimization API
+  - GEPAAlignmentOptimizer (default) — LLM reflection, no embeddings needed
+  - MemAlignOptimizer (optional) — requires embedding model
+  - mlflow.genai.optimize_prompts() — GEPA prompt optimization
 
-Environment setup (required for litellm routing on Databricks):
+Environment setup (required for litellm/DSPy routing on Databricks):
   - DATABRICKS_API_KEY = workspace PAT token
   - DATABRICKS_API_BASE = {host}/serving-endpoints
   - Judge model URI format: "databricks:/<endpoint-name>"
 
 Flow:
   1. Collect domain expert feedback from labeled traces
-  2. Create judge with make_judge() and align with GEPA alignment optimizer
-  3. Optimize prompts using MetaPromptOptimizer
+  2. Create judge with make_judge() and align with GEPA
+  3. Optimize prompts using GEPA prompt optimizer
   4. Evaluate optimized prompt vs baseline
 """
 
@@ -66,8 +69,8 @@ class IterativeOptimizer:
     """
     Manages the iterative optimization loop:
     1. Collect expert feedback → labeled traces
-    2. Create judge with make_judge(), align with GEPA alignment optimizer
-    3. Optimize system prompt using DSPy MIPROv2
+    2. Create judge with make_judge(), align with MemAlign
+    3. Optimize system prompt using GEPA prompt optimizer
     4. Compare optimized vs baseline with evaluation
     """
 
@@ -198,7 +201,7 @@ class IterativeOptimizer:
         Args:
             traces: List of MLflow Trace objects with human feedback
             optimizer_type: "gepa" (default, LLM reflection only) or
-                          "memalign" (requires embedding model / OPENAI_API_KEY)
+                          "memalign" (requires embedding model)
         """
         if not traces:
             logger.warning("No labeled traces — skipping judge alignment")
@@ -213,8 +216,6 @@ class IterativeOptimizer:
 
         try:
             if optimizer_type == "memalign":
-                # MemAlign requires an embedding model via DSPy/litellm.
-                # Uses Databricks embedding endpoint (databricks-gte-large-en).
                 from mlflow.genai.judges.optimizers import MemAlignOptimizer
                 embedding_model = self.judge_model.replace(
                     self.judge_model.split("/")[-1], "databricks-gte-large-en"
@@ -225,7 +226,6 @@ class IterativeOptimizer:
                 )
             else:
                 # GEPA uses LLM reflection only — no embeddings needed.
-                # Best fit for Databricks FMAPI environments.
                 optimizer = GEPAAlignmentOptimizer(
                     model=self.judge_model,
                     max_metric_calls=len(traces) * 4,
@@ -247,7 +247,7 @@ class IterativeOptimizer:
             logger.error(f"Judge alignment failed: {e}")
             return {"status": "failed", "error": str(e)}
 
-    # ── Step 3: Optimize Prompt (DSPy MIPROv2) ────────────────────
+    # ── Step 3: Optimize Prompt (GEPA) ───────────────────────────
 
     def optimize_prompt(
         self,
@@ -255,176 +255,78 @@ class IterativeOptimizer:
         eval_dataset: list[dict],
         prompt_name: str = "agent_system_prompt",
         scorers: list = None,
-        num_candidates: int = 7,
-        max_bootstrapped_demos: int = 3,
-        max_labeled_demos: int = 5,
+        max_metric_calls: int = 300,
     ) -> dict:
         """
-        Optimize the system prompt using DSPy MIPROv2 iterative optimization.
+        Optimize the system prompt using mlflow.genai.optimize_prompts()
+        with the GEPA prompt optimizer.
 
-        MIPROv2 generates candidate instruction variations, bootstraps
-        few-shot demonstrations, evaluates each against the metric, and
-        selects the best-performing combination.
+        Requires MLflow >= 3.5 and the gepa package. The optimizer:
+        1. Registers the current prompt in MLflow Prompt Registry
+        2. Evaluates the baseline using scorers
+        3. Generates candidate prompt variations via GEPA reflection
+        4. Returns the best-performing prompt
 
         Args:
             current_prompt: The current system prompt template
-            eval_dataset: List of dicts with 'inputs'/'request' and 'expectations'/'expected_response'
+            eval_dataset: List of dicts with 'inputs' and 'expectations' keys
             prompt_name: Name for the prompt in MLflow registry
             scorers: List of scorer functions (defaults to aligned judge or base judge)
-            num_candidates: Number of candidate prompts to generate
-            max_bootstrapped_demos: Max auto-generated few-shot examples
-            max_labeled_demos: Max examples from eval dataset to include
+            max_metric_calls: Max evaluations during optimization
         """
         try:
-            import dspy
-            from dspy.teleprompt import MIPROv2
+            from mlflow.genai.optimize import GepaPromptOptimizer
 
             # Use aligned judge as scorer if available, otherwise base judge
-            judge = self._aligned_judge or self._judge
-            if judge is None:
-                judge = self.create_judge()
+            if scorers is None:
+                judge = self._aligned_judge or self._judge
+                if judge is None:
+                    judge = self.create_judge()
+                scorers = [judge]
 
-            # Configure DSPy with Databricks LLM
-            lm_endpoint = self.judge_model.replace("databricks:/", "")
-            ws_url = os.environ.get("DATABRICKS_HOST", "")
-            api_key = os.environ.get("DATABRICKS_API_KEY", "")
-            lm = dspy.LM(
-                f"databricks/{lm_endpoint}",
-                api_base=f"{ws_url}/serving-endpoints",
-                api_key=api_key,
-                max_tokens=1024,
-                temperature=0.1,
+            # Register current prompt in MLflow Prompt Registry
+            prompt = mlflow.genai.register_prompt(
+                name=prompt_name,
+                template=current_prompt,
             )
-            dspy.configure(lm=lm)
-            logger.info(f"DSPy configured with databricks/{lm_endpoint}")
+            logger.info(f"Registered prompt '{prompt_name}' (URI: {prompt.uri})")
 
-            # Convert eval dataset to DSPy Examples
-            trainset = []
-            for entry in eval_dataset:
-                question = ""
-                expected = ""
-                if isinstance(entry, dict):
-                    # Support both formats: {inputs: {input: [...]}} and {request: "..."}
-                    inputs = entry.get("inputs", {})
-                    if isinstance(inputs, dict):
-                        msgs = inputs.get("input", inputs.get("query", ""))
-                        if isinstance(msgs, list) and msgs:
-                            question = msgs[-1].get("content", "") if isinstance(msgs[-1], dict) else str(msgs[-1])
-                        elif isinstance(msgs, str):
-                            question = msgs
-                    if not question:
-                        question = entry.get("request", entry.get("input", ""))
-                    expectations = entry.get("expectations", {})
-                    expected = expectations.get("expected_response", entry.get("expected_response", ""))
-                if question:
-                    trainset.append(
-                        dspy.Example(question=question, expected_answer=expected).with_inputs("question")
-                    )
+            # Define predict function that uses the registered prompt
+            def predict_fn(**kwargs) -> str:
+                loaded_prompt = mlflow.genai.load_prompt(f"prompts:/{prompt_name}/latest")
+                formatted = loaded_prompt.format(**kwargs)
+                return formatted
 
-            # Define DSPy module
-            class DocsQA(dspy.Module):
-                def __init__(self, system_prompt):
-                    super().__init__()
-                    self.generate = dspy.ChainOfThought(
-                        dspy.Signature("question -> answer", instructions=system_prompt)
-                    )
-                def forward(self, question):
-                    return self.generate(question=question)
-
-            # Define metric using the judge
-            def metric(example, prediction, trace=None):
-                try:
-                    score = judge(
-                        inputs={"input": [{"role": "user", "content": example.question}]},
-                        outputs={"response": prediction.answer},
-                    )
-                    val = getattr(score, "value", score)
-                    return bool(val) if isinstance(val, bool) else (val > 0.5 if isinstance(val, (int, float)) else bool(val))
-                except Exception:
-                    return False
-
-            # Evaluate baseline
-            agent = DocsQA(system_prompt=current_prompt)
-            baseline_scores = []
-            for ex in trainset:
-                try:
-                    pred = agent(question=ex.question)
-                    baseline_scores.append(1.0 if metric(ex, pred) else 0.0)
-                except Exception:
-                    baseline_scores.append(0.0)
-            baseline_score = sum(baseline_scores) / len(baseline_scores) if baseline_scores else 0.0
-
-            # Run MIPROv2 optimization
-            logger.info(f"Starting MIPROv2 optimization ({num_candidates} candidates, {len(trainset)} examples)")
-            import time
-            t0 = time.time()
-            optimizer = MIPROv2(metric=metric, auto=None, num_candidates=num_candidates, num_threads=2)
-            optimized_agent = optimizer.compile(
-                agent, trainset=trainset,
-                num_trials=num_candidates * 2,
-                max_bootstrapped_demos=max_bootstrapped_demos,
-                max_labeled_demos=max_labeled_demos,
-                minibatch=False,
+            # Run GEPA prompt optimization
+            logger.info(f"Starting GEPA prompt optimization (max_metric_calls={max_metric_calls})")
+            result = mlflow.genai.optimize_prompts(
+                predict_fn=predict_fn,
+                train_data=eval_dataset,
+                prompt_uris=[prompt.uri],
+                optimizer=GepaPromptOptimizer(
+                    reflection_model=self.judge_model,
+                    max_metric_calls=max_metric_calls,
+                ),
+                scorers=scorers,
             )
-            elapsed = time.time() - t0
 
-            # Evaluate optimized agent
-            optimized_scores = []
-            for ex in trainset:
-                try:
-                    pred = optimized_agent(question=ex.question)
-                    optimized_scores.append(1.0 if metric(ex, pred) else 0.0)
-                except Exception:
-                    optimized_scores.append(0.0)
-            optimized_score = sum(optimized_scores) / len(optimized_scores) if optimized_scores else 0.0
-
-            # Extract optimized prompt — try multiple DSPy attribute paths
-            _gen = optimized_agent.generate
-            optimized_instructions = None
-            for attr_path in ["signature.instructions", "extended_signature.instructions", "predict.signature.instructions"]:
-                obj = _gen
-                try:
-                    for part in attr_path.split("."):
-                        obj = getattr(obj, part)
-                    optimized_instructions = obj
-                    break
-                except AttributeError:
-                    continue
-            if optimized_instructions is None:
-                for attr_name in dir(_gen):
-                    obj = getattr(_gen, attr_name, None)
-                    if hasattr(obj, "instructions"):
-                        optimized_instructions = obj.instructions
-                        break
-            if optimized_instructions is None:
-                optimized_instructions = current_prompt
-
-            demos = []
-            for demo_attr in ["demos", "compiled_demos"]:
-                demos_list = getattr(_gen, demo_attr, None)
-                if demos_list:
-                    demos = [{"question": getattr(d, "question", ""), "answer": getattr(d, "answer", "")}
-                             for d in demos_list]
-                    break
-
-            logger.info(f"MIPROv2 complete — baseline: {baseline_score:.3f}, optimized: {optimized_score:.3f}, "
-                        f"demos: {len(demos)}, time: {elapsed:.0f}s")
+            optimized_prompt = result.optimized_prompts[0]
+            logger.info(f"Optimization complete — initial: {result.initial_eval_score}, "
+                        f"final: {result.final_eval_score}")
 
             return {
                 "status": "completed",
-                "optimizer": "MIPROv2",
                 "baseline_prompt": current_prompt[:200] + "...",
-                "baseline_score": baseline_score,
-                "optimized_prompt": optimized_instructions,
-                "optimized_score": optimized_score,
-                "improvement": optimized_score - baseline_score,
-                "demos": demos,
-                "elapsed_seconds": round(elapsed, 1),
+                "baseline_score": result.initial_eval_score,
+                "optimized_prompt": optimized_prompt.template,
+                "optimized_score": result.final_eval_score,
+                "improvement": result.final_eval_score - result.initial_eval_score,
+                "prompt_uri": optimized_prompt.uri,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-        except ImportError as e:
-            logger.warning(f"DSPy not available: {e}")
-            return {"status": "skipped", "reason": "dspy>=2.6 required for MIPROv2 optimization"}
+        except ImportError:
+            logger.warning("mlflow.genai.optimize or gepa not available — requires MLflow >= 3.5 + gepa")
+            return {"status": "skipped", "reason": "MLflow >= 3.5 + gepa required for optimize_prompts"}
         except Exception as e:
             logger.error(f"Prompt optimization failed: {e}")
             return {"status": "failed", "error": str(e)}
