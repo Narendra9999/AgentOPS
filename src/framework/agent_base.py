@@ -400,15 +400,18 @@ class AgentOPSBase(ChatAgent):
             pre_result = self.pre_llm_guardrails.check(
                 user_message, conversation_context=conversation_context)
             if pre_result.get("blocked"):
-                from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
-                yield ChatAgentChunk(
-                    choices=[ChatAgentChunkChoice(
-                        delta=ChatAgentChunkChoiceDelta(
-                            role="assistant",
-                            content=pre_result.get("message", "Request blocked."),
-                        )
-                    )]
-                )
+                try:
+                    from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+                    yield ChatAgentChunk(
+                        choices=[ChatAgentChunkChoice(
+                            delta=ChatAgentChunkChoiceDelta(
+                                role="assistant",
+                                content=pre_result.get("message", "Request blocked."),
+                            )
+                        )]
+                    )
+                except ImportError:
+                    yield {"choices": [{"delta": {"role": "assistant", "content": pre_result.get("message", "Request blocked.")}}]}
                 return
 
         # ── Recall long-term memory ──

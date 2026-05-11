@@ -137,14 +137,15 @@ class DatabricksDocsAgent(AgentOPSBase):
         return content
 
     def _call_llm_stream(self, messages: list[dict]):
-        """Stream LLM response token by token. Yields content chunks."""
-        import requests as _requests
+        """Stream LLM response token by token. Yields content chunks.
+
+        Uses the SDK's api_client for auth (works inside serving containers)
+        with stream=True for SSE streaming from the FMAPI endpoint.
+        """
         import json as _json
         from databricks.sdk import WorkspaceClient
 
         w = WorkspaceClient()
-        token = w.config.token
-        host = w.config.host.rstrip("/")
 
         body = {
             "messages": messages,
@@ -153,9 +154,9 @@ class DatabricksDocsAgent(AgentOPSBase):
             "stream": True,
         }
 
-        resp = _requests.post(
-            f"{host}/serving-endpoints/{self.llm_endpoint}/invocations",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        # Use raw HTTP via the SDK's authenticated session
+        resp = w.api_client._session.post(
+            f"{w.config.host}/serving-endpoints/{self.llm_endpoint}/invocations",
             json=body,
             stream=True,
             timeout=300,
@@ -256,22 +257,23 @@ class DatabricksDocsAgent(AgentOPSBase):
         context: Optional[dict] = None,
         custom_inputs: Optional[dict] = None,
     ):
-        """Streaming version — yields ChatAgentChunk objects token by token."""
-        from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
-
+        """Streaming version — yields chunk dicts compatible with ChatAgent streaming."""
         augmented_messages, retrieved_docs = self._build_augmented_messages(messages)
         self._request_context["retrieved_docs"] = retrieved_docs
 
-        # Stream tokens from LLM
-        for chunk in self._call_llm_stream(augmented_messages):
-            yield ChatAgentChunk(
-                choices=[ChatAgentChunkChoice(
-                    delta=ChatAgentChunkChoiceDelta(
-                        role="assistant",
-                        content=chunk,
-                    )
-                )]
-            )
+        # Try MLflow's ChatAgentChunk types, fall back to plain dicts
+        try:
+            from mlflow.types.agent import ChatAgentChunk, ChatAgentChunkChoice, ChatAgentChunkChoiceDelta
+            for chunk in self._call_llm_stream(augmented_messages):
+                yield ChatAgentChunk(
+                    choices=[ChatAgentChunkChoice(
+                        delta=ChatAgentChunkChoiceDelta(role="assistant", content=chunk)
+                    )]
+                )
+        except ImportError:
+            # Older MLflow — yield plain dicts
+            for chunk in self._call_llm_stream(augmented_messages):
+                yield {"choices": [{"delta": {"role": "assistant", "content": chunk}}]}
 
 
 # MLflow ChatAgent entry point
