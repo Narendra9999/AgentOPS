@@ -14,10 +14,11 @@ from mlflow.models import ModelConfig
 from mlflow.types.agent import ChatAgentMessage, ChatAgentResponse
 from typing import Optional
 import uuid
+import re
 import logging
 
 from framework.agent_base import AgentOPSBase
-from tools.agent_tools import search_docs
+from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,14 @@ class DatabricksDocsAgent(AgentOPSBase):
 
         self.vs_num_results = vs_config.get("num_results", 5)
         self.vs_columns = vs_config.get("columns", ["chunk_text", "url", "chunk_id"])
+
+        # Register available tools
+        self.tools = {
+            "search_docs": search_docs,
+            "calculate": calculate,
+            "get_current_timestamp": get_current_timestamp,
+            "format_sql": format_sql,
+        }
 
     def _load_system_prompt(self, config: dict) -> str:
         """Load system prompt from MLflow Prompt Registry, fall back to config.yaml.
@@ -212,6 +221,44 @@ class DatabricksDocsAgent(AgentOPSBase):
             messages=[ChatAgentMessage(
                 id=str(uuid.uuid4()), role="assistant", content=response_text)])
 
+    @mlflow.trace(span_type="TOOL", name="execute_tools")
+    def _execute_tools(self, user_message: str) -> str:
+        """Run tools based on patterns in the user message. Returns tool context or empty string."""
+        import json as _json
+        tool_results = []
+
+        # Calculate: detect math expressions
+        calc_pattern = r'(?:calculate|compute|what is|how much is)\s+(.+?)(?:\?|$)'
+        calc_match = re.search(calc_pattern, user_message.lower())
+        if calc_match:
+            expr = calc_match.group(1).strip()
+            # Check if it looks like a math expression
+            if re.match(r'^[\d\s\+\-\*\/\.\(\)%]+$', expr):
+                result = calculate(expr)
+                if "result" in result:
+                    tool_results.append(f"[Calculator] {expr} = {result['result']}")
+
+        # Timestamp: detect time-related queries
+        if any(kw in user_message.lower() for kw in ["current time", "what time", "timestamp", "current date"]):
+            ts = get_current_timestamp()
+            tool_results.append(f"[Timestamp] Current time: {ts['utc']}")
+
+        # SQL formatting: detect SQL in the query
+        sql_pattern = r'(?:format|validate|check)(?:\s+this)?\s+sql[:\s]+(.+)'
+        sql_match = re.search(sql_pattern, user_message.lower(), re.DOTALL)
+        if sql_match:
+            sql_text = sql_match.group(1).strip().strip('`"\'')
+            result = format_sql(sql_text)
+            if "formatted" in result:
+                parts = [f"[SQL Formatter] {result['formatted']}"]
+                if result.get("warnings"):
+                    parts.append(f"Warnings: {'; '.join(result['warnings'])}")
+                tool_results.append("\n".join(parts))
+
+        if tool_results:
+            return "Tool Results:\n" + "\n".join(tool_results)
+        return ""
+
     def _build_augmented_messages(self, messages):
         """Build the augmented prompt (shared between predict and predict_stream)."""
         recent_user_msgs = [
@@ -225,6 +272,12 @@ class DatabricksDocsAgent(AgentOPSBase):
             {"role": "system", "content": self.system_prompt},
             {"role": "system", "content": f"Documentation Context:\n\n{context_text}"},
         ]
+
+        # Execute tools based on user message
+        user_message = recent_user_msgs[-1] if recent_user_msgs else ""
+        tool_context = self._execute_tools(user_message)
+        if tool_context:
+            augmented_messages.append({"role": "system", "content": tool_context})
 
         user_memories = self._request_context.get("user_memories", [])
         if user_memories:
