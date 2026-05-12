@@ -421,24 +421,36 @@ def _load_domain_scorers(config: list, judge_model: str) -> List:
     import os
 
     scorers_dir = os.path.join(os.path.dirname(__file__), "scorers", "domain")
-    all_configs = []
+    scorer_configs = {}  # name → config dict
 
     # Load from YAML files first
-    file_names = set()
     if os.path.isdir(scorers_dir):
         for fname in sorted(os.listdir(scorers_dir)):
             if fname.endswith(".yaml") or fname.endswith(".yml"):
                 fpath = os.path.join(scorers_dir, fname)
                 with open(fpath) as f:
                     cfg = yaml.safe_load(f) or {}
-                all_configs.append(cfg)
-                file_names.add(cfg.get("name", ""))
+                name = cfg.get("name", fname.replace(".yaml", "").replace(".yml", ""))
+                scorer_configs[name] = cfg
                 logger.info(f"  Loaded domain config from file: {fname}")
 
-    # Add inline configs that aren't already loaded from files
+    # Merge inline configs — override enabled/weight/threshold for existing,
+    # add new scorers that don't have YAML files
     for inline_cfg in (config or []):
-        if inline_cfg.get("name") not in file_names:
-            all_configs.append(inline_cfg)
+        name = inline_cfg.get("name", "")
+        if not name:
+            continue
+        if name in scorer_configs:
+            # File exists — inline overrides enabled/weight/threshold/rules
+            for key in ("enabled", "weight", "threshold", "rules"):
+                if key in inline_cfg:
+                    scorer_configs[name][key] = inline_cfg[key]
+            logger.info(f"  Overrode domain scorer from config: {name}")
+        else:
+            # No file — use inline config as-is
+            scorer_configs[name] = inline_cfg
+
+    all_configs = list(scorer_configs.values())
 
     scorers = []
     model_uri = f"databricks:/{judge_model}"

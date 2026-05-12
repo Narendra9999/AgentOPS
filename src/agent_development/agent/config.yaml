@@ -98,7 +98,16 @@ evaluation:
     source_citation:
       weight: 0.8
 
-  domain_scorers: []
+  # Domain scorers loaded from scorers/domain/*.yaml
+  # Override enabled/weight/threshold here (by name):
+  domain_scorers:
+    - name: databricks_terminology
+      enabled: true
+      weight: 1.0
+    - name: security_compliance
+      enabled: true
+      weight: 1.5
+      threshold: 4.0
 
 guardrails:
   enabled: true
