@@ -54,6 +54,7 @@ llm_endpoint = dbutils.widgets.get("llm_endpoint")
 vs_endpoint = dbutils.widgets.get("vs_endpoint")
 vs_index = dbutils.widgets.get("vs_index")
 embedding_model = dbutils.widgets.get("embedding_model")
+team_config = dbutils.widgets.get("team_config").strip()
 
 import mlflow
 import os, sys, subprocess, glob
