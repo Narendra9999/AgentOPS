@@ -151,8 +151,11 @@ class PreLLMGuardrails:
         text = message.strip()
 
         # Block gibberish: messages with very few real words relative to length
+        # Count both words and number groups as meaningful tokens
         words = re.findall(r'[a-zA-Z]{2,}', text)
-        if len(text) > 20 and len(words) < 2:
+        numbers = re.findall(r'\d+\.?\d*', text)
+        meaningful_tokens = len(words) + len(numbers)
+        if len(text) > 20 and meaningful_tokens < 2:
             return {
                 "blocked": True,
                 "intent": "gibberish",
