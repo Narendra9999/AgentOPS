@@ -217,6 +217,7 @@ targets:
       catalog: classic_stable_cykcbe_catalog
       schema: agentops
       cluster_id: "0320-195141-v7nlku6o"
+      skip_data_ingestion: "true"
 
   e2-demo:
     mode: development

@@ -178,6 +178,9 @@ class DatabricksDocsAgent(AgentOPSBase):
         w = WorkspaceClient()
         openai_client = w.serving_endpoints.get_open_ai_client()
 
+        tracker = TokenTracker(model_name=self.llm_endpoint)
+        chunk_count = 0
+
         for chunk in openai_client.chat.completions.create(
             model=self.llm_endpoint,
             messages=messages,
@@ -185,6 +188,10 @@ class DatabricksDocsAgent(AgentOPSBase):
             temperature=self.temperature,
             stream=True,
         ):
+            # Track usage from final chunk (some models include it)
+            if hasattr(chunk, "usage") and chunk.usage:
+                tracker.track(chunk)
+
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 # Some models stream content as a list of objects (reasoning + text)
@@ -196,7 +203,14 @@ class DatabricksDocsAgent(AgentOPSBase):
                     ]
                     content = "".join(text_parts)
                 if content:
+                    chunk_count += 1
                     yield content
+
+        # If no usage from chunks, estimate from chunk count
+        if tracker.requests == 0 and chunk_count > 0:
+            tracker.track_streaming([None] * chunk_count)
+
+        self._request_context["token_usage"] = tracker
 
     @mlflow.trace(span_type="CHAIN")
     def _process_request(
