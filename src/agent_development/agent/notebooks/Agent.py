@@ -180,6 +180,7 @@ class DatabricksDocsAgent(AgentOPSBase):
 
         tracker = TokenTracker(model_name=self.llm_endpoint)
         chunk_count = 0
+        last_chunk_with_usage = None
 
         for chunk in openai_client.chat.completions.create(
             model=self.llm_endpoint,
@@ -188,9 +189,9 @@ class DatabricksDocsAgent(AgentOPSBase):
             temperature=self.temperature,
             stream=True,
         ):
-            # Track usage from final chunk (some models include it)
+            # Capture the last chunk with usage (only track once at the end)
             if hasattr(chunk, "usage") and chunk.usage:
-                tracker.track(chunk)
+                last_chunk_with_usage = chunk
 
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
@@ -206,8 +207,11 @@ class DatabricksDocsAgent(AgentOPSBase):
                     chunk_count += 1
                     yield content
 
-        # If no usage from chunks, estimate from chunk count
-        if tracker.requests == 0 and chunk_count > 0:
+        # Track usage once from the last chunk that had it
+        if last_chunk_with_usage:
+            tracker.track(last_chunk_with_usage)
+        elif chunk_count > 0:
+            # No usage in any chunk — estimate from chunk count
             tracker.track_streaming([None] * chunk_count)
 
         self._request_context["token_usage"] = tracker
