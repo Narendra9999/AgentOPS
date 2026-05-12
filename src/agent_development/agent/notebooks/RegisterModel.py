@@ -100,6 +100,15 @@ if team_config:
 else:
     _config_path = _default_config
 
+# Resolve team custom tools directory (if team_config is set)
+_custom_tools_dir = None
+if team_config:
+    _team_dir_name = os.path.dirname(team_config)  # e.g., teams/platform-engineering
+    _candidate = os.path.join(_bundle_root, _team_dir_name, "tools")
+    if os.path.isdir(_candidate) and any(f.endswith(".py") for f in os.listdir(_candidate)):
+        _custom_tools_dir = _candidate
+        print(f"Team custom tools: {_custom_tools_dir}")
+
 print(f"Project root (src): {_project_root}")
 print(f"Bundle root: {_bundle_root}")
 print(f"Agent dir: {_agent_dir}")
@@ -241,7 +250,7 @@ with mlflow.start_run(run_name="agent_registration"):
         artifact_path="agent",
         python_model=os.path.join(_agent_dir, "Agent.py"),
         model_config=_runtime_config,
-        code_paths=[_tools_dir],
+        code_paths=[_tools_dir] + ([_custom_tools_dir] if _custom_tools_dir else []),
         input_example=input_example,
         resources=resources,
         conda_env=_conda_env,

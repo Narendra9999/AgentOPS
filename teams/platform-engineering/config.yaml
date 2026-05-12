@@ -38,6 +38,15 @@ system_prompt: |
   - If the context doesn't contain the answer, say so honestly
   - Focus on infrastructure and platform best practices
 
+tools:
+  calculator: true
+  timestamp: true
+  sql_formatter: true
+  cluster_sizing: true
+  custom_tools:
+    - compute_estimator
+    - workspace_info
+
 vector_search:
   endpoint: agentops-vs-endpoint
   index: platform_eng_docs_index

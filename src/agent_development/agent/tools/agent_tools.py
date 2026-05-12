@@ -1,12 +1,16 @@
 """
 Agent Tools — Re-exports all tool functions.
 
-Each tool lives in its own file for easy editing:
+Shared tools (each in its own file):
   - search_docs.py: Vector search retrieval
   - calculator.py: Safe math expression evaluator
   - timestamp.py: Current UTC timestamp
   - sql_formatter.py: SQL formatting and validation
   - cluster_sizing.py: Cluster config recommendations and node info
+
+Custom team tools:
+  - tool_loader.py: Plugin loader for team-specific tools
+  - Teams add .py files to teams/{team}/tools/ with standard interface
 """
 
 from tools.search_docs import search_docs

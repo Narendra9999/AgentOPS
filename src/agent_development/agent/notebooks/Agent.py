@@ -19,6 +19,7 @@ import logging
 
 from framework.agent_base import AgentOPSBase
 from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql, cluster_sizing, get_node_info
+from tools.tool_loader import load_custom_tools, execute_custom_tools
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class DatabricksDocsAgent(AgentOPSBase):
         self.vs_reranker_enabled = str(vs_config.get("reranker_enabled", "false")).lower() == "true"
         self.vs_reranker_model = vs_config.get("reranker_model", "")
 
-        # Register available tools
+        # Register shared tools
         self.tools = {
             "search_docs": search_docs,
             "calculate": calculate,
@@ -76,6 +77,13 @@ class DatabricksDocsAgent(AgentOPSBase):
             "cluster_sizing": cluster_sizing,
             "get_node_info": get_node_info,
         }
+
+        # Load team-specific custom tools from config
+        tools_config = config.get("tools", {})
+        custom_tool_names = tools_config.get("custom_tools", [])
+        self.custom_tools = load_custom_tools(custom_tool_names)
+        if self.custom_tools:
+            logger.info(f"Loaded {len(self.custom_tools)} custom tools: {list(self.custom_tools.keys())}")
 
     def _load_system_prompt(self, config: dict) -> str:
         """Load system prompt from MLflow Prompt Registry, fall back to config.yaml.
@@ -331,6 +339,11 @@ class DatabricksDocsAgent(AgentOPSBase):
                     f"{result['memory_gb']} GB RAM, {result.get('storage_gb', 0)} GB storage, "
                     f"{result['dbu_per_hour']} DBU/hr ({result['category']})"
                 )
+
+        # Execute custom team tools
+        if self.custom_tools:
+            custom_results = execute_custom_tools(self.custom_tools, user_message)
+            tool_results.extend(custom_results)
 
         if tool_results:
             return "Tool Results:\n" + "\n".join(tool_results)
