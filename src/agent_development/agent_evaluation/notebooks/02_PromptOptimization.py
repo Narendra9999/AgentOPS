@@ -276,7 +276,7 @@ with mlflow.start_run(run_name="gepa_prompt_optimization"):
             max_metric_calls=MAX_METRIC_CALLS,
         ),
         scorers=[correctness_scorer, quality_judge],
-        objective=objective,
+        aggregation=objective,
     )
 
     elapsed = time.time() - t0
