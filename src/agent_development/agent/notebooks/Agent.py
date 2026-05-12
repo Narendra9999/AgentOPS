@@ -18,7 +18,7 @@ import re
 import logging
 
 from framework.agent_base import AgentOPSBase
-from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql, cluster_sizing, get_node_info
+from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql, cluster_sizing, get_node_info, NODE_CATALOG
 from tools.tool_loader import load_custom_tools, execute_custom_tools
 from tools.token_tracker import TokenTracker
 
