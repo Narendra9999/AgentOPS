@@ -249,6 +249,24 @@ with mlflow.start_run(run_name="gepa_prompt_optimization"):
         "prompt_name": PROMPT_NAME,
     })
 
+    # Objective function: converts scorer outputs to a single numeric score
+    # Correctness returns numeric (1-5), response_quality returns boolean Feedback
+    def objective(scores: dict) -> float:
+        total = 0.0
+        count = 0
+        for name, val in scores.items():
+            if isinstance(val, (int, float)):
+                total += val
+                count += 1
+            elif hasattr(val, "value"):
+                # Feedback object — convert bool to 1.0/0.0
+                total += 1.0 if val.value else 0.0
+                count += 1
+            elif isinstance(val, bool):
+                total += 1.0 if val else 0.0
+                count += 1
+        return total / max(count, 1)
+
     result = mlflow.genai.optimize_prompts(
         predict_fn=predict_fn,
         train_data=dataset,
@@ -258,6 +276,7 @@ with mlflow.start_run(run_name="gepa_prompt_optimization"):
             max_metric_calls=MAX_METRIC_CALLS,
         ),
         scorers=[correctness_scorer, quality_judge],
+        objective=objective,
     )
 
     elapsed = time.time() - t0
