@@ -128,7 +128,7 @@ print(f"Prompt ({len(current_prompt)} chars):\n{current_prompt[:300]}...")
 
 def predict_fn(question: str) -> str:
     """Load prompt from registry, format with question, call LLM."""
-    loaded_prompt = mlflow.genai.load_prompt(f"prompts:/{PROMPT_NAME}@latest")
+    loaded_prompt = mlflow.genai.load_prompt(f"prompts:/{PROMPT_NAME}@production")
     system_content = loaded_prompt.format()
 
     completion = openai_client.chat.completions.create(
