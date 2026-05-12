@@ -34,21 +34,19 @@ def load_custom_tools(tool_names: list, tools_dir: str = None) -> dict:
     if not tool_names:
         return {}
 
-    # Resolve tools directory — check multiple locations
-    # When packaged by MLflow, code_paths are extracted to the model directory
+    # Resolve tools directory — custom tools are copied into tools/custom_tools/
+    # by RegisterModel.py before model packaging
     if tools_dir is None:
         candidates = [
-            os.path.join(os.path.dirname(__file__), "custom_tools"),  # local dev
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "custom_tools"),  # model serving
+            os.path.join(os.path.dirname(__file__), "custom_tools"),  # inside tools/ package
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "custom_tools"),  # model root
         ]
-        # Also check all sys.path entries for the tool modules directly
         for path in candidates:
             if os.path.isdir(path):
                 tools_dir = path
                 break
 
     if tools_dir is None or not os.path.isdir(tools_dir):
-        # Tools might be importable directly (code_paths adds to sys.path)
         logger.info("No custom_tools directory found — trying direct import")
         tools_dir = None
 

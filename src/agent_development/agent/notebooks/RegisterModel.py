@@ -100,14 +100,20 @@ if team_config:
 else:
     _config_path = _default_config
 
-# Resolve team custom tools directory (if team_config is set)
-_custom_tools_dir = None
+# Copy team custom tools into tools/custom_tools/ so they're packaged with the model
+# (MLflow can't copy workspace paths as separate code_paths — they must be under tools/)
+import shutil
+_custom_tools_dest = os.path.join(_tools_dir, "custom_tools")
 if team_config:
     _team_dir_name = os.path.dirname(team_config)  # e.g., teams/platform-engineering
     _candidate = os.path.join(_bundle_root, _team_dir_name, "tools")
-    if os.path.isdir(_candidate) and any(f.endswith(".py") for f in os.listdir(_candidate)):
-        _custom_tools_dir = _candidate
-        print(f"Team custom tools: {_custom_tools_dir}")
+    if os.path.isdir(_candidate):
+        tool_files = [f for f in os.listdir(_candidate) if f.endswith(".py")]
+        if tool_files:
+            os.makedirs(_custom_tools_dest, exist_ok=True)
+            for f in tool_files:
+                shutil.copy2(os.path.join(_candidate, f), _custom_tools_dest)
+            print(f"Copied {len(tool_files)} custom tools to {_custom_tools_dest}: {tool_files}")
 
 print(f"Project root (src): {_project_root}")
 print(f"Bundle root: {_bundle_root}")
@@ -250,7 +256,7 @@ with mlflow.start_run(run_name="agent_registration"):
         artifact_path="agent",
         python_model=os.path.join(_agent_dir, "Agent.py"),
         model_config=_runtime_config,
-        code_paths=[_tools_dir] + ([_custom_tools_dir] if _custom_tools_dir else []),
+        code_paths=[_tools_dir],
         input_example=input_example,
         resources=resources,
         conda_env=_conda_env,
