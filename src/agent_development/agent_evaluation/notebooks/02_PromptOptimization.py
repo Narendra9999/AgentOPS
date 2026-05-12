@@ -204,8 +204,8 @@ quality_judge = make_judge(
     name="response_quality",
     instructions=(
         "Evaluate the quality of the agent's response.\n\n"
-        "Question: {{ inputs.question }}\n"
-        "Response: {{ outputs.response }}\n\n"
+        "Question: {{ inputs }}\n"
+        "Response: {{ outputs }}\n\n"
         "Consider:\n"
         "- Accuracy: factually correct based on Databricks documentation?\n"
         "- Completeness: does it fully address the question?\n"

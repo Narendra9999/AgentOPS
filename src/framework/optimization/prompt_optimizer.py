@@ -90,8 +90,8 @@ def optimize_prompt(
             name="response_quality",
             instructions=(
                 "Evaluate the quality of the agent's response.\n\n"
-                "Question: {{ inputs.question }}\n"
-                "Response: {{ outputs.response }}\n\n"
+                "Question: {{ inputs }}\n"
+                "Response: {{ outputs }}\n\n"
                 "Consider: accuracy, completeness, code quality, actionability."
             ),
             model=scorer_model,
