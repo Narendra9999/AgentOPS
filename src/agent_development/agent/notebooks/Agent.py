@@ -18,7 +18,7 @@ import re
 import logging
 
 from framework.agent_base import AgentOPSBase
-from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql
+from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql, cluster_sizing, get_node_info
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,8 @@ class DatabricksDocsAgent(AgentOPSBase):
             "calculate": calculate,
             "get_current_timestamp": get_current_timestamp,
             "format_sql": format_sql,
+            "cluster_sizing": cluster_sizing,
+            "get_node_info": get_node_info,
         }
 
     def _load_system_prompt(self, config: dict) -> str:
@@ -254,6 +256,77 @@ class DatabricksDocsAgent(AgentOPSBase):
                 if result.get("warnings"):
                     parts.append(f"Warnings: {'; '.join(result['warnings'])}")
                 tool_results.append("\n".join(parts))
+
+        # Cluster sizing: detect sizing/capacity queries
+        msg_lower = user_message.lower()
+        sizing_keywords = ["cluster size", "cluster sizing", "how many nodes", "how many workers",
+                           "node type", "instance type", "cluster config", "cluster recommendation",
+                           "capacity planning", "cluster for"]
+        if any(kw in msg_lower for kw in sizing_keywords):
+            # Extract data size if mentioned
+            size_match = re.search(r'(\d+\.?\d*)\s*(gb|tb|mb|petabyte|pb)', msg_lower)
+            data_gb = 100  # default
+            if size_match:
+                size_val = float(size_match.group(1))
+                unit = size_match.group(2)
+                if unit == "tb":
+                    data_gb = size_val * 1024
+                elif unit in ("pb", "petabyte"):
+                    data_gb = size_val * 1024 * 1024
+                elif unit == "mb":
+                    data_gb = size_val / 1024
+                else:
+                    data_gb = size_val
+
+            # Detect use case
+            use_case = "etl"
+            if any(kw in msg_lower for kw in ["ml", "training", "model", "machine learning"]):
+                use_case = "ml_training"
+            elif any(kw in msg_lower for kw in ["stream", "real-time", "realtime", "kafka"]):
+                use_case = "streaming"
+            elif any(kw in msg_lower for kw in ["sql", "analytics", "bi", "query", "dashboard"]):
+                use_case = "sql_analytics"
+            elif any(kw in msg_lower for kw in ["inference", "scoring", "prediction", "batch scoring"]):
+                use_case = "ml_inference"
+
+            # Detect cloud
+            cloud = "AWS"
+            if any(kw in msg_lower for kw in ["azure", "standard_"]):
+                cloud = "Azure"
+
+            # Detect specific node type
+            node_type = None
+            for nt in NODE_CATALOG:
+                if nt.lower() in msg_lower:
+                    node_type = nt
+                    break
+
+            result = cluster_sizing(data_gb, use_case, node_type, cloud)
+            if "error" not in result:
+                rec = result["recommendation"]
+                cap = result["cluster_capacity"]
+                sizing = result["sizing_breakdown"]
+                parts = [
+                    f"[Cluster Sizing] Use case: {result['use_case']} | Data: {data_gb} GB",
+                    f"  Node type: {rec['node_type']} ({result['node_specs']['vcpus']} vCPUs, {result['node_specs']['memory_gb']} GB RAM)",
+                    f"  Workers: {rec['num_workers']} (autoscale {rec['autoscale']['min_workers']}-{rec['autoscale']['max_workers']})",
+                    f"  Total capacity: {cap['total_vcpus']} vCPUs, {cap['total_memory_gb']} GB RAM, {cap['total_dbu_per_hour']} DBU/hr",
+                    f"  Limiting factor: {sizing['limiting_factor']}",
+                    f"  Tips: {'; '.join(result['tips'])}",
+                ]
+                tool_results.append("\n".join(parts))
+
+        # Node info: detect node type lookup
+        node_pattern = r'(?:what is|specs for|info on|details of)\s+((?:i3|m5|r5|c5|p3|g5|Standard_)\S+)'
+        node_match = re.search(node_pattern, user_message, re.IGNORECASE)
+        if node_match:
+            result = get_node_info(node_match.group(1))
+            if "error" not in result:
+                tool_results.append(
+                    f"[Node Info] {result['node_type']}: {result['vcpus']} vCPUs, "
+                    f"{result['memory_gb']} GB RAM, {result.get('storage_gb', 0)} GB storage, "
+                    f"{result['dbu_per_hour']} DBU/hr ({result['category']})"
+                )
 
         if tool_results:
             return "Tool Results:\n" + "\n".join(tool_results)
