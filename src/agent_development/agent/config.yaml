@@ -22,29 +22,11 @@ llm:
   max_history_turns: 10
   max_retrieval_turns: 3
 
-# Session history persistence — save multi-turn conversations for analytics & replay
-# Both backends can be enabled simultaneously, or either one independently.
 session_history:
-  enabled: false                       # Serving endpoint is stateless — callers manage history
+  enabled: false
 
-  # Unity Catalog Delta table — append-only, queryable via SQL/Spark
-  unity_catalog:
-    enabled: false
-    table: session_history
-    warehouse_id: 3c623898df7d3c96
-
-  # Lakebase — disabled for serving endpoint (no Lakebase role for endpoint SP)
-  lakebase:
-    enabled: false
-    project: agentops-sessions
-    branch: production
-
-# Long-term agent memory — cross-session user facts with semantic search
-# Uses the same Lakebase DatabricksStore instance as session_history.lakebase.
-# Stored as namespace ("users", user_id) with semantic search via store.search().
-# Pass user_id in custom_inputs to enable: {"user_id": "user@example.com"}
 long_term_memory:
-  enabled: false                       # Disabled for stateless serving endpoint
+  enabled: false
 
 vector_search:
   endpoint: agentops-vs-endpoint
@@ -55,6 +37,14 @@ vector_search:
     - chunk_text
     - url
     - chunk_id
+  reranker_enabled: false
+  reranker_model: databricks-bge-large-en
+
+tools:
+  calculator: true
+  timestamp: true
+  sql_formatter: true
+  cluster_sizing: true
 
 system_prompt: |
   You are a Databricks Documentation Assistant. You help users understand:
@@ -82,27 +72,11 @@ system_prompt: |
   - Keep responses concise and actionable
 
 evaluation:
-  # Scorer modes — select any combination:
-  #   "builtin"              — MLflow built-in scorers only
-  #   "llm_judge"            — Custom LLM-as-judge scorers only
-  #   "domain"               — Domain-specific scorers only
-  #   "builtin,llm_judge"    — Two groups (comma-separated)
-  #   "builtin,domain"       — Two groups
-  #   "llm_judge,domain"     — Two groups
-  #   "all"                  — All three types combined
-  # Multiple groups run in PARALLEL with individual MLflow trace spans.
-  # Default: "builtin" (safest, no external judge calls needed)
   scorer_mode: all
-
-  # Quality gate threshold — pipeline blocks deployment if mean scores fall below this
   quality_gate_threshold: 3.5
-
-  # Judge model for LLM-as-judge scorers (internal FMAPI, no internet needed)
   judge_model: databricks-meta-llama-3-3-70b-instruct
 
-  # --- MLflow Built-in Scorers (scorer_mode: builtin or all) ---
   builtin_scorers:
-    # Guidelines: evaluate against natural language criteria
     guidelines:
       enabled: true
       name: response_quality
@@ -111,43 +85,23 @@ evaluation:
         - "The response must not include fabricated information"
         - "The response must be concise and well-structured"
         - "The response must reference Databricks-specific features when applicable"
-
-    # Correctness: compare response to expected answer/facts
     correctness:
       enabled: true
-
-    # RelevanceToQuery: check if response addresses the query
     relevance_to_query:
       enabled: true
-
-    # Safety: check for harmful content
     safety:
       enabled: true
-
-    # RetrievalGroundedness: check if response is grounded in retrieved context
-    # Note: requires RETRIEVER span type in tracing — only works with pre-deployment eval (pyfunc)
     retrieval_groundedness:
-      enabled: false
+      enabled: true
 
-  # --- LLM-as-Judge Scorers (scorer_mode: llm_judge or all) ---
-  # Scorer definitions loaded from: scorers/llm_judge/*.yaml
-  # Each YAML file defines: name, criteria, rubric, weight, threshold
-  # Override enabled/weight/threshold per-scorer here (optional):
   llm_judge_scorers:
     source_citation:
-      weight: 0.8               # Lower weight — citation is nice-to-have
+      weight: 0.8
 
-  # --- Domain-Specific Scorers (scorer_mode: domain or all) ---
-  # Scorer definitions loaded from: scorers/domain/*.yaml
-  # Each YAML file defines: name, type, rules/criteria/patterns, weight, threshold
-  # Add new scorers by creating a YAML file in scorers/domain/
-  # Supported types: guidelines, rubric, keyword, expected_facts
   domain_scorers: []
 
 guardrails:
   enabled: true
-  # Note: LLM-based safety is handled by AI Gateway safety filter
-  # on the serving endpoint (ai_gateway_safety_enabled: true in databricks.yml).
   pre_llm:
     min_input_length: 10
     max_input_length: 4000
@@ -158,85 +112,8 @@ guardrails:
       - injection
       - toxicity
       - intent
-    domain_context_keywords:
-      - databricks
-      - spark
-      - delta
-      - catalog
-      - unity
-      - mlflow
-      - notebook
-      - cluster
-      - warehouse
-      - pipeline
-      - lakehouse
-      - api
-      - sdk
-      - table
-      - schema
-      - volume
-      - model
-      - endpoint
-      - job
-      - workflow
-      - kill
-      - terminate
-    intent_keywords:
-      databricks_query:
-        - databricks
-        - spark
-        - delta
-        - unity catalog
-        - mlflow
-        - notebook
-        - cluster
-        - warehouse
-        - sql
-        - pipeline
-        - lakehouse
-        - api
-        - sdk
-        - pyspark
-        - dbutils
-        - autoloader
-        - medallion
-        - streaming
-        - serving
-        - endpoint
-        - model
-        - vector search
-        - bundle
-        - dab
-        - job
-        - workflow
-        - volume
-        - schema
-        - catalog
-        - table
-        - python
-        - code
-        - function
-        - how to
-        - how do
-        - what is
-        - create
-        - configure
-        - deploy
-        - error
-        - fix
-        - best practice
-      general_greeting:
-        - hello
-        - hi
-        - hey
-        - help
-        - good morning
-        - good afternoon
-        - what can you
-        - who are you
-    # Intent keywords and allowed_intents are no longer used.
-    # The intent check now uses gibberish detection (see pre_llm.py).
-    # Off-topic questions are handled naturally by the LLM via system prompt.
+    # Intent uses gibberish deny-list (see pre_llm.py).
+    # Off-topic questions handled by the LLM via system prompt.
   post_llm:
     enabled_checks:
       - toxicity

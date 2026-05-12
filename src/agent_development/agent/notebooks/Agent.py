@@ -64,6 +64,8 @@ class DatabricksDocsAgent(AgentOPSBase):
 
         self.vs_num_results = vs_config.get("num_results", 5)
         self.vs_columns = vs_config.get("columns", ["chunk_text", "url", "chunk_id"])
+        self.vs_reranker_enabled = str(vs_config.get("reranker_enabled", "false")).lower() == "true"
+        self.vs_reranker_model = vs_config.get("reranker_model", "")
 
         # Register available tools
         self.tools = {
@@ -102,6 +104,8 @@ class DatabricksDocsAgent(AgentOPSBase):
             index_name=self.vs_index,
             columns=self.vs_columns,
             num_results=self.vs_num_results,
+            reranker_enabled=self.vs_reranker_enabled,
+            reranker_model=self.vs_reranker_model,
         )
 
         if not docs:
