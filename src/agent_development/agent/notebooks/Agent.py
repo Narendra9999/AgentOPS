@@ -20,6 +20,7 @@ import logging
 from framework.agent_base import AgentOPSBase
 from tools.agent_tools import search_docs, calculate, get_current_timestamp, format_sql, cluster_sizing, get_node_info
 from tools.tool_loader import load_custom_tools, execute_custom_tools
+from tools.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,12 @@ class DatabricksDocsAgent(AgentOPSBase):
             max_tokens=self.max_tokens,
             temperature=self.temperature,
         )
+
+        # Track token usage
+        tracker = TokenTracker(model_name=self.llm_endpoint)
+        tracker.track(response)
+        self._request_context["token_usage"] = tracker
+
         content = response.choices[0].message.content
         # Some models return content as a list of objects (reasoning + text)
         if isinstance(content, list):

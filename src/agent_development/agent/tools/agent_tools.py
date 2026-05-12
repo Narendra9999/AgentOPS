@@ -11,6 +11,9 @@ Shared tools (each in its own file):
 Custom team tools:
   - tool_loader.py: Plugin loader for team-specific tools
   - Teams add .py files to teams/{team}/tools/ with standard interface
+
+Monitoring:
+  - token_tracker.py: Token usage and cost tracking per LLM call
 """
 
 from tools.search_docs import search_docs

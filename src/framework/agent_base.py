@@ -208,12 +208,17 @@ class AgentOPSBase(ChatAgent):
                 )
             mlflow.update_current_trace(tags={"agentops.guardrail.post_llm.blocked": "false"})
 
-        # ── Tag with latency ──
+        # ── Tag with latency + token usage ──
         latency_ms = (time.time() - start_time) * 1000
-        mlflow.update_current_trace(tags={
+        trace_tags = {
             "agentops.latency_ms": str(round(latency_ms, 2)),
             "agentops.status": "success",
-        })
+        }
+        # Add token usage tags if tracked by the agent
+        token_usage = self._request_context.get("token_usage")
+        if token_usage and hasattr(token_usage, "to_tags"):
+            trace_tags.update(token_usage.to_tags())
+        mlflow.update_current_trace(tags=trace_tags)
 
         # ── Save session history ──
         if self.session_store.enabled:
@@ -468,8 +473,12 @@ class AgentOPSBase(ChatAgent):
                 trace_id=trace_id,
             )
 
-        mlflow.update_current_trace(tags={
+        stream_tags = {
             "agentops.latency_ms": str(round(latency_ms, 2)),
             "agentops.status": "success",
             "agentops.streaming": "true",
-        })
+        }
+        token_usage = self._request_context.get("token_usage")
+        if token_usage and hasattr(token_usage, "to_tags"):
+            stream_tags.update(token_usage.to_tags())
+        mlflow.update_current_trace(tags=stream_tags)
