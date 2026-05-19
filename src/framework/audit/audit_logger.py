@@ -124,6 +124,11 @@ def get_audit_ddls(catalog: str, audit_schema: str) -> dict:
                 response STRING,
                 expected_response STRING,
                 context STRING,
+                -- Dynamic per-scorer scores (key = scorer name, value = score). Holds
+                -- every scorer that ran in this evaluation, including team-defined ones.
+                scores MAP<STRING, DOUBLE>,
+                -- Legacy hardcoded score columns kept for backwards compat with existing
+                -- dashboards/queries; new code should read `scores` instead.
                 toxicity_score DOUBLE,
                 accuracy_score DOUBLE,
                 helpfulness_score DOUBLE,

@@ -5,6 +5,13 @@ agent:
   description: "Platform Engineering Documentation Assistant"
   version: "1.0.0"
 
+naming:
+  # Reuse generic schema + audit for FEVM dev testing (existing data + VS index).
+  # Switch to platform_eng_agent / platform_eng_audit for real team isolation.
+  schema: agentops
+  audit_schema: agentops_audit
+  chatbot: platform-eng-chatbot
+
 tracing:
   default_tags:
     agentops.team: platform_engineering
@@ -49,7 +56,9 @@ tools:
 
 vector_search:
   endpoint: agentops-vs-endpoint
-  index: platform_eng_docs_index
+  # Reuse generic index for FEVM dev testing (existing data already loaded).
+  # Switch to platform_eng_docs_index for real team isolation.
+  index: databricks_docs_index
   num_results: 5
   search_type: similarity
   columns:

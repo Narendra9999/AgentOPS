@@ -4,13 +4,23 @@
 # Customize the agent's behavior for your team's use case.
 # This overrides the default config.yaml in src/agent_development/agent/
 #
-# Copy to teams/<your-team>/config.yaml and edit.
+# Copy to src/teams/<your-team>/config.yaml and edit.
 # ─────────────────────────────────────────────────────────────
 
 agent:
   name: TEMPLATE_agent                    # ← rename to your agent name
   description: "TEMPLATE Documentation Assistant"
   version: "1.0.0"
+
+# Naming — used by Jenkins/CD to derive infra names from this single config.
+# Each field is optional; helper derives sensible defaults from agent.name if omitted:
+#   schema       → agent.name
+#   audit_schema → agent.name + "_audit"
+#   chatbot      → agent.name with underscores → dashes + "-chatbot"
+naming:
+  schema: TEMPLATE_schema
+  audit_schema: TEMPLATE_audit
+  chatbot: TEMPLATE-chatbot
 
 tracing:
   default_tags:

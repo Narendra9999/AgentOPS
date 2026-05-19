@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentops-framework"
-version = "2.0.2"
+version = "2.0.9"
 description = "AgentOPS Framework — guardrails, evaluation, audit, monitoring"
 requires-python = ">=3.10"
 dependencies = [
@@ -33,3 +33,4 @@ include = ["framework*"]
 # To run integration tests: pytest -m integration --endpoint-name <name>
 # To run smoke tests:       pytest -m smoke --endpoint-name <name>
 testpaths = ["tests/unit"]
+pythonpath = ["src"]

@@ -27,6 +27,7 @@ resources:
               max_documents: ${var.max_documents}
               raw_data_table: ${var.raw_data_table}
               skip_data_ingestion: ${var.skip_data_ingestion}
+              team_name: ${var.team_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -46,6 +47,7 @@ resources:
               chunk_overlap: ${var.chunk_overlap}
               min_chunk_size: ${var.min_chunk_size}
               chunking_strategy: ${var.chunking_strategy}
+              team_name: ${var.team_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -63,6 +65,7 @@ resources:
               vs_endpoint: ${var.vs_endpoint}
               vs_index: ${var.vs_index}
               embedding_model: ${var.embedding_model}
+              team_name: ${var.team_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -81,6 +84,7 @@ resources:
               vs_endpoint: ${var.vs_endpoint}
               vs_index: ${var.vs_index}
               embedding_model: ${var.embedding_model}
+              team_name: ${var.team_name}
               team_config: ${var.team_config}
           existing_cluster_id: ${var.cluster_id}
           libraries:
@@ -101,6 +105,7 @@ resources:
               eval_golden_table: ${var.eval_golden_table}
               eval_adversarial_table: ${var.eval_adversarial_table}
               eval_results_table: ${var.eval_results_table}
+              team_name: ${var.team_name}
               team_dir: ${var.team_dir}
           existing_cluster_id: ${var.cluster_id}
           libraries:
@@ -130,6 +135,7 @@ resources:
               rate_limit_per_user_per_minute: ${var.rate_limit_per_user_per_minute}
               rate_limit_per_endpoint_per_minute: ${var.rate_limit_per_endpoint_per_minute}
               usage_tracking_enabled: ${var.usage_tracking_enabled}
+              team_name: ${var.team_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -149,6 +155,7 @@ resources:
               vs_endpoint: ${var.vs_endpoint}
               vs_index: ${var.vs_index}
               chatbot_name: ${var.chatbot_name}
+              team_name: ${var.team_name}
           existing_cluster_id: ${var.cluster_id}
           libraries:
             - whl: ../dist/agentops_framework-*.whl
@@ -169,6 +176,7 @@ resources:
               eval_adversarial_table: ${var.eval_adversarial_table}
               eval_results_table: ${var.eval_results_table}
               chatbot_name: ${var.chatbot_name}
+              team_name: ${var.team_name}
               team_dir: ${var.team_dir}
           existing_cluster_id: ${var.cluster_id}
           libraries:

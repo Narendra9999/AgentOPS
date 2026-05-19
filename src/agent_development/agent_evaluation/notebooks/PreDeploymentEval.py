@@ -16,17 +16,19 @@ dbutils.widgets.text("environment", "dev")
 dbutils.widgets.text("eval_golden_table", "eval_golden_dataset")
 dbutils.widgets.text("eval_adversarial_table", "eval_adversarial_dataset")
 dbutils.widgets.text("eval_results_table", "eval_results")
-dbutils.widgets.text("team_dir", "")
+dbutils.widgets.text("team_name", "")
+dbutils.widgets.text("team_dir", "")  # legacy override
 
-agent_name = dbutils.widgets.get("agent_name")
+_w_agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-audit_schema = dbutils.widgets.get("audit_schema")
+_w_schema = dbutils.widgets.get("schema")
+_w_audit_schema = dbutils.widgets.get("audit_schema")
 environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
-team_dir = dbutils.widgets.get("team_dir").strip()
+team_name = dbutils.widgets.get("team_name").strip()
+team_dir = dbutils.widgets.get("team_dir").strip() or team_name
 
 # COMMAND ----------
 
@@ -53,14 +55,36 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 # Re-read widgets after restart
-agent_name = dbutils.widgets.get("agent_name")
+import os
+_w_agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-audit_schema = dbutils.widgets.get("audit_schema")
+_w_schema = dbutils.widgets.get("schema")
+_w_audit_schema = dbutils.widgets.get("audit_schema")
 environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
+team_name = dbutils.widgets.get("team_name").strip()
+team_dir = dbutils.widgets.get("team_dir").strip() or team_name
+
+# Resolve bundle root for team_config helper
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+_project_root = _src_root  # back-compat alias used later for fixture path resolution
+
+# Resolve team settings — team config wins when team_name is set; widgets fill gaps only.
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+
+def _pick(team_val, widget_val):
+    return team_val if team_val else widget_val
+
+agent_name = _pick(_settings.get("agent_name"), _w_agent_name)
+schema = _pick(_settings.get("schema"), _w_schema)
+audit_schema = _pick(_settings.get("audit_schema"), _w_audit_schema)
+print(f"team_name={team_name!r}  resolved → agent_name={agent_name!r} schema={schema!r} audit_schema={audit_schema!r}")
 
 # COMMAND ----------
 
@@ -86,16 +110,15 @@ pipeline.start()
 # COMMAND ----------
 
 import pandas as pd
-import os, sys
+import sys
 
-nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]
-# Project root: .../files/src → .../files
-_project_root = "/Workspace" + os.path.dirname(nb_root)
+nb_root = _nb_path.rsplit("/", 3)[0]  # path-prefix used for shared fixture lookup below
+# _bundle_root + _src_root already computed above
 
 def _resolve_fixture(filename):
     """Resolve fixture path: team fixtures → shared fixtures."""
     if team_dir:
-        team_path = os.path.join(_project_root, "teams", team_dir, "fixtures", filename)
+        team_path = os.path.join(_bundle_root, "src", "teams", team_dir, "fixtures", filename)
         if os.path.exists(team_path):
             print(f"Using team fixture: {team_path}")
             return team_path
@@ -167,7 +190,16 @@ import yaml
 from framework.guardrails.pre_llm import PreLLMGuardrails
 from framework.evaluation.evaluation_pipeline import run_guardrail_evaluation
 
-with open(os.path.join(_agent_dir, "config.yaml")) as f:
+# Load guardrail config — prefer team config when team_name is set, else shared default
+_team_cfg_path = os.path.join(_bundle_root, "src", "teams", team_name, "config.yaml") if team_name else ""
+_shared_cfg_path = os.path.join(_agent_dir, "config.yaml")
+if team_name and os.path.exists(_team_cfg_path):
+    _cfg_path = _team_cfg_path
+    print(f"Loading guardrails from team config: {_cfg_path}")
+else:
+    _cfg_path = _shared_cfg_path
+    print(f"Loading guardrails from shared config: {_cfg_path}")
+with open(_cfg_path) as f:
     agent_config = yaml.safe_load(f)
 
 pre_guardrails = PreLLMGuardrails(agent_config.get("guardrails", {}).get("pre_llm", {}))
@@ -237,7 +269,9 @@ scorer_mode = eval_config.get("scorer_mode", "builtin")
 eval_thresholds = get_thresholds(eval_config)
 
 # Load scorer groups for parallel execution (mode="all" → 3 groups)
-scorer_groups = load_scorer_groups(eval_config)
+# Team isolation: load scorer YAMLs from team's scorers/ dir if team_name is set.
+_team_scorers_dir = os.path.join(_bundle_root, "src", "teams", team_name, "scorers") if team_name else None
+scorer_groups = load_scorer_groups(eval_config, team_scorers_dir=_team_scorers_dir)
 total_scorers = sum(len(s) for s in scorer_groups.values())
 print(f"Scorer mode: {scorer_mode} → {total_scorers} scorers in {len(scorer_groups)} groups")
 for group_name, scorers in scorer_groups.items():

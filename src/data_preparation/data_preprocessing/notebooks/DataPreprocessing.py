@@ -13,16 +13,29 @@ dbutils.widgets.text("chunk_size", "1000")
 dbutils.widgets.text("chunk_overlap", "200")
 dbutils.widgets.text("min_chunk_size", "50")
 dbutils.widgets.text("chunking_strategy", "sentence")
+dbutils.widgets.text("team_name", "")
 
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
+_w_schema = dbutils.widgets.get("schema")
 raw_data_table = dbutils.widgets.get("raw_data_table")
 preprocessed_data_table = dbutils.widgets.get("preprocessed_data_table")
 chunk_size = int(dbutils.widgets.get("chunk_size"))
 chunk_overlap = int(dbutils.widgets.get("chunk_overlap"))
 min_chunk_size = int(dbutils.widgets.get("min_chunk_size"))
 chunking_strategy = dbutils.widgets.get("chunking_strategy")
+team_name = dbutils.widgets.get("team_name").strip()
 
+# Resolve team settings — team config wins when team_name is set.
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
+
+print(f"team_name={team_name!r}  resolved → schema={schema!r}")
 print(f"Config: strategy={chunking_strategy}, chunk_size={chunk_size}, overlap={chunk_overlap}, min={min_chunk_size}")
 
 # COMMAND ----------

@@ -11,13 +11,26 @@ dbutils.widgets.text("data_source_url", "https://docs.databricks.com/en/doc-site
 dbutils.widgets.text("max_documents", "0")
 dbutils.widgets.text("raw_data_table", "databricks_docs_raw")
 dbutils.widgets.text("skip_data_ingestion", "false")
+dbutils.widgets.text("team_name", "")
 
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
+_w_schema = dbutils.widgets.get("schema")
 data_source_url = dbutils.widgets.get("data_source_url")
 max_docs = int(dbutils.widgets.get("max_documents")) or None
 raw_data_table = dbutils.widgets.get("raw_data_table")
 skip_ingestion = dbutils.widgets.get("skip_data_ingestion").strip().lower() == "true"
+team_name = dbutils.widgets.get("team_name").strip()
+
+# Resolve team settings — team config wins when team_name is set.
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
+print(f"team_name={team_name!r}  resolved → schema={schema!r}")
 
 # COMMAND ----------
 
@@ -62,11 +75,22 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 # Re-read widgets after restart
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
+_w_schema = dbutils.widgets.get("schema")
 data_source_url = dbutils.widgets.get("data_source_url")
 max_docs = int(dbutils.widgets.get("max_documents")) or None
 raw_data_table = dbutils.widgets.get("raw_data_table")
+team_name = dbutils.widgets.get("team_name").strip()
+
+# Re-resolve team settings after restart
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
 
 # Start audit tracking (after pip restart so variables persist)
 from framework.audit.audit_logger import PipelineStepLogger

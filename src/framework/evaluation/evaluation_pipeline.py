@@ -131,9 +131,67 @@ def save_eval_results_to_table(
         # Fallback: extract from assessments (MLflow 3.3.2)
         return _get_score_from_assessments(row_dict, scorer_name)
 
+    def _coerce_score(val):
+        """Coerce a scorer value to float. Numeric → float; "yes"/"true"/"pass" → 1.0;
+        "no"/"false"/"fail" → 0.0. Returns None if unconvertible."""
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return 1.0 if val else 0.0
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+        s = str(val).strip().lower()
+        if s in ("yes", "true", "pass", "passed"):
+            return 1.0
+        if s in ("no", "false", "fail", "failed"):
+            return 0.0
+        return None
+
+    def _extract_all_scores(row_dict):
+        """Build {scorer_name: score} for every scorer that ran on this row.
+
+        Sources, in priority order:
+        1. MLflow 3.10+ per-row columns: '<scorer>/value' or '<scorer>/v1/score'
+        2. MLflow 3.3.2 assessments list: each entry has assessment_name + feedback.value
+
+        Pass/fail string values (yes/no, true/false, pass/fail) are coerced to 1.0/0.0
+        so Guidelines and other boolean scorers also appear in the scores map.
+        """
+        scores: dict[str, float] = {}
+        for col, val in row_dict.items():
+            if val is None or str(val) in ("None", "nan", ""):
+                continue
+            scorer_name = None
+            if isinstance(col, str):
+                if col.endswith("/value"):
+                    scorer_name = col[: -len("/value")]
+                elif col.endswith("/v1/score"):
+                    scorer_name = col[: -len("/v1/score")]
+            if scorer_name is None or scorer_name in scores:
+                continue
+            coerced = _coerce_score(val)
+            if coerced is not None:
+                scores[scorer_name] = coerced
+        # Assessments fallback (MLflow 3.3.2)
+        for a in (row_dict.get("assessments") or []):
+            if not isinstance(a, dict):
+                continue
+            name = a.get("assessment_name")
+            feedback = a.get("feedback")
+            if not name or name in scores:
+                continue
+            if isinstance(feedback, dict):
+                coerced = _coerce_score(feedback.get("value"))
+                if coerced is not None:
+                    scores[name] = coerced
+        return scores
+
     eval_rows = []
     for i, row in per_row_df.iterrows():
         row_dict = row.to_dict()
+        scores_map = _extract_all_scores(row_dict)
         eval_rows.append({
             "evaluation_id": evaluation_id,
             "execution_id": execution_id,
@@ -142,6 +200,9 @@ def save_eval_results_to_table(
             "response": str(row_dict.get("response", row_dict.get("outputs", "")))[:4000],
             "expected_response": str(row_dict.get("targets", ""))[:4000],
             "context": "",
+            # Captures EVERY scorer that ran — team-defined and built-in alike.
+            "scores": scores_map,
+            # Legacy hardcoded columns kept populated for back-compat with old dashboards.
             "toxicity_score": _get_score(row_dict, "toxicity", "toxicity/value", "toxicity/v1/score"),
             "accuracy_score": _get_score(row_dict, "accuracy", "accuracy/value", "accuracy/v1/score"),
             "helpfulness_score": _get_score(row_dict, "helpfulness", "helpfulness/value", "helpfulness/v1/score"),

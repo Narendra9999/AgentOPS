@@ -7,7 +7,7 @@ Team tools follow a standard interface:
     TRIGGER_PATTERNS: list   — keywords that trigger the tool
     execute(**kwargs) -> dict — the tool function
 
-Team tools live in: teams/{team}/tools/*.py
+Team tools live in: src/teams/{team}/tools/*.py
 They are packaged into the model via code_paths in RegisterModel.py.
 """
 

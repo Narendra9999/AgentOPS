@@ -100,11 +100,17 @@ variables:
   eval_results_table:
     description: UC table name for per-row evaluation results
     default: eval_results
+  # Team selection — pass ONE var (team_name); helper resolves everything else
+  # from src/teams/<team_name>/config.yaml at runtime.
+  team_name:
+    description: "Team directory name under src/teams/ (e.g., platform-engineering). Empty = use shared defaults."
+    default: ""
+  # Legacy overrides — kept as override fallbacks. Empty = use team_name resolution.
   team_dir:
-    description: "Team directory name under teams/ (e.g., platform-engineering). Empty = use shared fixtures."
+    description: "[Legacy] Team directory name under src/teams/. Prefer team_name."
     default: ""
   team_config:
-    description: "Path to team config.yaml relative to bundle root (e.g., teams/platform-engineering/config.yaml). Empty = use shared config."
+    description: "[Legacy] Path to team config.yaml. Prefer team_name."
     default: ""
 
   # Model deployment parameters

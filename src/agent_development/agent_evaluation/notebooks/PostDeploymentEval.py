@@ -15,18 +15,20 @@ dbutils.widgets.text("eval_golden_table", "eval_golden_dataset")
 dbutils.widgets.text("eval_adversarial_table", "eval_adversarial_dataset")
 dbutils.widgets.text("eval_results_table", "eval_results")
 dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
-dbutils.widgets.text("team_dir", "")
+dbutils.widgets.text("team_name", "")
+dbutils.widgets.text("team_dir", "")  # legacy override
 
-agent_name = dbutils.widgets.get("agent_name")
+_w_agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-audit_schema = dbutils.widgets.get("audit_schema")
+_w_schema = dbutils.widgets.get("schema")
+_w_audit_schema = dbutils.widgets.get("audit_schema")
 environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
-chatbot_name = dbutils.widgets.get("chatbot_name")
-team_dir = dbutils.widgets.get("team_dir").strip()
+_w_chatbot_name = dbutils.widgets.get("chatbot_name")
+team_name = dbutils.widgets.get("team_name").strip()
+team_dir = dbutils.widgets.get("team_dir").strip() or team_name
 
 # COMMAND ----------
 
@@ -53,16 +55,32 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 # Re-read widgets after restart
-agent_name = dbutils.widgets.get("agent_name")
+import os
+_w_agent_name = dbutils.widgets.get("agent_name")
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-audit_schema = dbutils.widgets.get("audit_schema")
+_w_schema = dbutils.widgets.get("schema")
+_w_audit_schema = dbutils.widgets.get("audit_schema")
 environment = dbutils.widgets.get("environment")
 eval_golden_table = dbutils.widgets.get("eval_golden_table")
 eval_adversarial_table = dbutils.widgets.get("eval_adversarial_table")
 eval_results_table = dbutils.widgets.get("eval_results_table")
-chatbot_name = dbutils.widgets.get("chatbot_name")
-team_dir = dbutils.widgets.get("team_dir").strip()
+_w_chatbot_name = dbutils.widgets.get("chatbot_name")
+team_name = dbutils.widgets.get("team_name").strip()
+team_dir = dbutils.widgets.get("team_dir").strip() or team_name
+
+# Resolve bundle root for team_config helper
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+agent_name = _settings.get("agent_name") or _w_agent_name
+schema = _settings.get("schema") or _w_schema
+audit_schema = _settings.get("audit_schema") or _w_audit_schema
+chatbot_name = _settings.get("chatbot_name") or _w_chatbot_name
+print(f"team_name={team_name!r}  resolved → agent_name={agent_name!r} schema={schema!r} audit_schema={audit_schema!r} chatbot_name={chatbot_name!r}")
 
 # COMMAND ----------
 
@@ -92,14 +110,13 @@ for _tname, _ddl in get_audit_ddls(catalog, audit_schema).items():
     spark.sql(_ddl)
     print(f"Ensured table: {catalog}.{audit_schema}.{_tname}")
 
-# Resolve path relative to this notebook
-nb_root = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().rsplit("/", 3)[0]
-_project_root = "/Workspace" + os.path.dirname(nb_root)
+# Resolve path relative to this notebook (uses _nb_path/_bundle_root from above)
+nb_root = _nb_path.rsplit("/", 3)[0]  # path-prefix used for shared fixture lookup
 
 def _resolve_fixture(filename):
     """Resolve fixture path: team fixtures → shared fixtures."""
     if team_dir:
-        team_path = os.path.join(_project_root, "teams", team_dir, "fixtures", filename)
+        team_path = os.path.join(_bundle_root, "src", "teams", team_dir, "fixtures", filename)
         if os.path.exists(team_path):
             print(f"Using team fixture: {team_path}")
             return team_path
@@ -128,8 +145,16 @@ import yaml
 from framework.guardrails.pre_llm import PreLLMGuardrails
 from framework.evaluation.evaluation_pipeline import run_guardrail_evaluation
 
-# Load guardrail config
-with open(f"/Workspace/{nb_root}/agent/config.yaml") as f:
+# Load guardrail config — prefer team config when team_name is set, else shared default
+_team_cfg_path = os.path.join(_bundle_root, "src", "teams", team_name, "config.yaml") if team_name else ""
+_shared_cfg_path = f"/Workspace/{nb_root}/agent/config.yaml"
+if team_name and os.path.exists(_team_cfg_path):
+    _cfg_path = _team_cfg_path
+    print(f"Loading guardrails from team config: {_cfg_path}")
+else:
+    _cfg_path = _shared_cfg_path
+    print(f"Loading guardrails from shared config: {_cfg_path}")
+with open(_cfg_path) as f:
     agent_config = yaml.safe_load(f)
 
 pre_guardrails = PreLLMGuardrails(agent_config.get("guardrails", {}).get("pre_llm", {}))
@@ -166,18 +191,27 @@ _nb_dir = os.path.dirname(_nb_path)
 _project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))
 sys.path.insert(0, _project_root)
 
-# Load scorers based on config.yaml evaluation settings
-# When mode="all", scorer groups run in PARALLEL with MLflow trace spans per group
+# Load scorers config — prefer team config when team_name is set, else shared default
 import yaml
 _agent_dir = os.path.join(_project_root, "agent_development", "agent")
-with open(os.path.join(_agent_dir, "config.yaml")) as f:
+_team_cfg_path2 = os.path.join(_bundle_root, "src", "teams", team_name, "config.yaml") if team_name else ""
+_shared_cfg_path2 = os.path.join(_agent_dir, "config.yaml")
+if team_name and os.path.exists(_team_cfg_path2):
+    _cfg_path2 = _team_cfg_path2
+    print(f"Loading scorers from team config: {_cfg_path2}")
+else:
+    _cfg_path2 = _shared_cfg_path2
+    print(f"Loading scorers from shared config: {_cfg_path2}")
+with open(_cfg_path2) as f:
     _agent_config = yaml.safe_load(f)
 
 from agent_development.agent_evaluation.evaluation.scorer_loader import (
     load_scorer_groups, get_thresholds,
 )
 eval_config = _agent_config.get("evaluation", {})
-scorer_groups = load_scorer_groups(eval_config)
+# Team isolation: load scorer YAMLs from team's scorers/ dir if team_name is set.
+_team_scorers_dir = os.path.join(_bundle_root, "src", "teams", team_name, "scorers") if team_name else None
+scorer_groups = load_scorer_groups(eval_config, team_scorers_dir=_team_scorers_dir)
 eval_thresholds = get_thresholds(eval_config)
 scorer_mode = eval_config.get("scorer_mode", "builtin")
 total_scorers = sum(len(s) for s in scorer_groups.values())

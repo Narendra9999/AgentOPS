@@ -8,7 +8,8 @@
 
 # COMMAND ----------
 
-# Parameters — infrastructure settings from databricks.yml via pipeline
+# Parameters — pass `team_name` to resolve everything else from src/teams/<team>/config.yaml.
+# Other widgets remain as override fallbacks: non-empty overrides the team-config value.
 dbutils.widgets.text("catalog", "")
 dbutils.widgets.text("schema", "")
 dbutils.widgets.text("agent_name", "")
@@ -16,7 +17,8 @@ dbutils.widgets.text("llm_endpoint", "")
 dbutils.widgets.text("vs_endpoint", "")
 dbutils.widgets.text("vs_index", "")
 dbutils.widgets.text("embedding_model", "")
-dbutils.widgets.text("team_config", "")
+dbutils.widgets.text("team_name", "")
+dbutils.widgets.text("team_config", "")  # legacy override
 
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
@@ -25,6 +27,7 @@ llm_endpoint = dbutils.widgets.get("llm_endpoint")
 vs_endpoint = dbutils.widgets.get("vs_endpoint")
 vs_index = dbutils.widgets.get("vs_index")
 embedding_model = dbutils.widgets.get("embedding_model")
+team_name = dbutils.widgets.get("team_name").strip()
 team_config = dbutils.widgets.get("team_config").strip()
 
 # COMMAND ----------
@@ -48,16 +51,44 @@ dbutils.library.restartPython()
 
 # Re-read after restart
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-agent_name = dbutils.widgets.get("agent_name")
-llm_endpoint = dbutils.widgets.get("llm_endpoint")
-vs_endpoint = dbutils.widgets.get("vs_endpoint")
-vs_index = dbutils.widgets.get("vs_index")
-embedding_model = dbutils.widgets.get("embedding_model")
+_w_schema = dbutils.widgets.get("schema")
+_w_agent_name = dbutils.widgets.get("agent_name")
+_w_llm_endpoint = dbutils.widgets.get("llm_endpoint")
+_w_vs_endpoint = dbutils.widgets.get("vs_endpoint")
+_w_vs_index = dbutils.widgets.get("vs_index")
+_w_embedding_model = dbutils.widgets.get("embedding_model")
+team_name = dbutils.widgets.get("team_name").strip()
 team_config = dbutils.widgets.get("team_config").strip()
 
 import mlflow
 import os, sys, subprocess, glob
+
+# Resolve notebook-relative paths up-front so the team_config helper can find files
+# in the deployed workspace bundle (the helper installed in the wheel can't infer this).
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = os.path.dirname(_project_root)  # .../files (where pyproject.toml lives)
+
+# Resolve team settings — single source of truth from src/teams/<team_name>/config.yaml.
+# When team_name is set, team config values WIN. Widgets only fill gaps the team config
+# doesn't specify (empty/missing values). Without team_name, widgets are used as-is.
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+
+def _pick(team_val, widget_val):
+    return team_val if team_val else widget_val
+
+schema = _pick(_settings.get("schema"), _w_schema)
+agent_name = _pick(_settings.get("agent_name"), _w_agent_name)
+llm_endpoint = _pick(_settings.get("llm_endpoint"), _w_llm_endpoint)
+vs_endpoint = _pick(_settings.get("vs_endpoint"), _w_vs_endpoint)
+vs_index = _pick(_settings.get("vs_index"), _w_vs_index)
+embedding_model = _pick(_settings.get("embedding_model"), _w_embedding_model)
+if team_name and not team_config:
+    # Set legacy team_config to bundle-relative path so downstream lookup logic works
+    team_config = f"src/teams/{team_name}/config.yaml"
+print(f"team_name={team_name!r}  resolved → agent_name={agent_name!r} schema={schema!r} vs_index={vs_index!r} llm_endpoint={llm_endpoint!r}")
 
 # Start audit tracking (after pip restart)
 from framework.audit.audit_logger import PipelineStepLogger
@@ -80,10 +111,7 @@ mlflow.set_experiment(experiment_name)
 
 # COMMAND ----------
 
-_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-_nb_dir = os.path.dirname(_nb_path)  # .../notebooks
-_project_root = "/Workspace" + os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
-_bundle_root = os.path.dirname(_project_root)  # .../files (where pyproject.toml lives)
+# _nb_path/_nb_dir/_project_root/_bundle_root already computed above for team_config helper
 _agent_dir = "/Workspace" + _nb_dir
 _default_config = os.path.join(os.path.dirname(_agent_dir), "config.yaml")
 _tools_dir = os.path.join(os.path.dirname(_agent_dir), "tools")
@@ -105,7 +133,7 @@ else:
 import shutil
 _custom_tools_dest = os.path.join(_tools_dir, "custom_tools")
 if team_config:
-    _team_dir_name = os.path.dirname(team_config)  # e.g., teams/platform-engineering
+    _team_dir_name = os.path.dirname(team_config)  # e.g., src/teams/platform-engineering
     _candidate = os.path.join(_bundle_root, _team_dir_name, "tools")
     if os.path.isdir(_candidate):
         tool_files = [f for f in os.listdir(_candidate) if f.endswith(".py")]

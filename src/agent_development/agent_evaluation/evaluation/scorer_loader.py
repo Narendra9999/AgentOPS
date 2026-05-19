@@ -40,13 +40,15 @@ def _parse_scorer_modes(mode: str) -> set:
     return {m.strip() for m in mode.split(",") if m.strip()}
 
 
-def load_scorers(eval_config: dict, judge_model: str = None) -> List:
+def load_scorers(eval_config: dict, judge_model: str = None, team_scorers_dir: str = None) -> List:
     """
     Load scorers based on the evaluation config section of config.yaml.
 
     Args:
         eval_config: The 'evaluation' section from config.yaml
         judge_model: Override judge model endpoint name
+        team_scorers_dir: When set, prefer YAMLs from this dir (e.g. ``src/teams/<team>/scorers``)
+            over the shared default. Allows team isolation of scorer suites.
 
     Returns:
         List of scorer objects ready for mlflow.genai.evaluate(scorers=...)
@@ -60,16 +62,16 @@ def load_scorers(eval_config: dict, judge_model: str = None) -> List:
         scorers.extend(_load_builtin_scorers(eval_config.get("builtin_scorers", {}), judge))
 
     if "llm_judge" in modes:
-        scorers.extend(_load_llm_judge_scorers(eval_config.get("llm_judge_scorers", {})))
+        scorers.extend(_load_llm_judge_scorers(eval_config.get("llm_judge_scorers", {}), team_scorers_dir=team_scorers_dir))
 
     if "domain" in modes:
-        scorers.extend(_load_domain_scorers(eval_config.get("domain_scorers", []), judge))
+        scorers.extend(_load_domain_scorers(eval_config.get("domain_scorers", []), judge, team_scorers_dir=team_scorers_dir))
 
     logger.info(f"Loaded {len(scorers)} scorers (modes={modes}): {[_scorer_name(s) for s in scorers]}")
     return scorers
 
 
-def load_scorer_groups(eval_config: dict, judge_model: str = None) -> Dict[str, List]:
+def load_scorer_groups(eval_config: dict, judge_model: str = None, team_scorers_dir: str = None) -> Dict[str, List]:
     """
     Load scorers grouped by type for parallel execution.
 
@@ -77,6 +79,10 @@ def load_scorer_groups(eval_config: dict, judge_model: str = None) -> Dict[str, 
       "builtin"           → 1 group
       "builtin,domain"    → 2 groups (parallel)
       "all"               → 3 groups (parallel)
+
+    Args:
+        team_scorers_dir: When set, prefer YAMLs from this dir (e.g. ``src/teams/<team>/scorers``)
+            over the shared default. Allows team isolation of scorer suites.
 
     Returns dict of {group_name: [scorers]} where each group can be
     evaluated independently in parallel.
@@ -92,12 +98,12 @@ def load_scorer_groups(eval_config: dict, judge_model: str = None) -> Dict[str, 
             groups["builtin"] = builtin
 
     if "llm_judge" in modes:
-        llm_judge = _load_llm_judge_scorers(eval_config.get("llm_judge_scorers", {}))
+        llm_judge = _load_llm_judge_scorers(eval_config.get("llm_judge_scorers", {}), team_scorers_dir=team_scorers_dir)
         if llm_judge:
             groups["llm_judge"] = llm_judge
 
     if "domain" in modes:
-        domain = _load_domain_scorers(eval_config.get("domain_scorers", []), judge)
+        domain = _load_domain_scorers(eval_config.get("domain_scorers", []), judge, team_scorers_dir=team_scorers_dir)
         if domain:
             groups["domain"] = domain
 
@@ -173,9 +179,18 @@ def run_parallel_evaluation(eval_data, scorer_groups: Dict[str, List]) -> dict:
                     result = future.result()
                     group_results[group_name] = result
                     merged_metrics.update(result["metrics"])
+                    # Each group's table has the same rows (request/response) but a
+                    # disjoint set of scorer columns. Merge horizontally on row index
+                    # so the final per_row_df carries scorer columns from EVERY group.
                     for table_name, table_df in result.get("tables", {}).items():
                         if table_name not in merged_tables:
-                            merged_tables[table_name] = table_df
+                            merged_tables[table_name] = table_df.copy()
+                            continue
+                        existing = merged_tables[table_name]
+                        # Skip shared identity columns (request/response/etc.) when merging
+                        new_cols = [c for c in table_df.columns if c not in existing.columns]
+                        if new_cols:
+                            merged_tables[table_name] = existing.join(table_df[new_cols], how="outer")
                 except Exception as e:
                     logger.error(f"Scorer group '{group_name}' failed: {e}")
                     group_results[group_name] = {"error": str(e), "duration_ms": 0}
@@ -324,17 +339,25 @@ def _load_builtin_scorers(config: dict, judge_model: str) -> List:
     return scorers
 
 
-def _load_llm_judge_scorers(config: dict) -> List:
+def _load_llm_judge_scorers(config: dict, team_scorers_dir: str = None) -> List:
     """Load custom LLM-as-judge scorers from YAML files or inline config.
 
     Looks for scorer definitions in:
-      1. scorers/llm_judge/*.yaml (file-based, preferred)
-      2. config.yaml llm_judge_scorers section (inline, fallback)
+      1. team_scorers_dir/llm_judge/*.yaml — when team_scorers_dir is given (team isolation)
+      2. <framework>/scorers/llm_judge/*.yaml — otherwise (shared defaults)
+      3. config.yaml llm_judge_scorers section (inline, overrides file values)
     """
     import yaml
     import os
 
-    scorers_dir = os.path.join(os.path.dirname(__file__), "scorers", "llm_judge")
+    shared_dir = os.path.join(os.path.dirname(__file__), "scorers", "llm_judge")
+    team_dir = os.path.join(team_scorers_dir, "llm_judge") if team_scorers_dir else ""
+    if team_dir and os.path.isdir(team_dir):
+        scorers_dir = team_dir
+        logger.info(f"  Using team llm_judge scorers from: {scorers_dir}")
+    else:
+        scorers_dir = shared_dir
+        logger.info(f"  Using shared llm_judge scorers from: {scorers_dir}")
     scorer_configs = {}
 
     # Load from YAML files first
@@ -403,7 +426,7 @@ def _load_llm_judge_scorers(config: dict) -> List:
     return scorers
 
 
-def _load_domain_scorers(config: list, judge_model: str) -> List:
+def _load_domain_scorers(config: list, judge_model: str, team_scorers_dir: str = None) -> List:
     """
     Load domain-specific scorers from YAML files or inline config.
 
@@ -420,7 +443,14 @@ def _load_domain_scorers(config: list, judge_model: str) -> List:
     import yaml
     import os
 
-    scorers_dir = os.path.join(os.path.dirname(__file__), "scorers", "domain")
+    shared_dir = os.path.join(os.path.dirname(__file__), "scorers", "domain")
+    team_dir = os.path.join(team_scorers_dir, "domain") if team_scorers_dir else ""
+    if team_dir and os.path.isdir(team_dir):
+        scorers_dir = team_dir
+        logger.info(f"  Using team domain scorers from: {scorers_dir}")
+    else:
+        scorers_dir = shared_dir
+        logger.info(f"  Using shared domain scorers from: {scorers_dir}")
     scorer_configs = {}  # name → config dict
 
     # Load from YAML files first

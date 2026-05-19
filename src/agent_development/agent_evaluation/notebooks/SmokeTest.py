@@ -14,16 +14,34 @@ dbutils.widgets.text("environment", "dev")
 dbutils.widgets.text("vs_endpoint", "agentops-vs-endpoint")
 dbutils.widgets.text("vs_index", "databricks_docs_index")
 dbutils.widgets.text("chatbot_name", "agentops-docs-chatbot")
+dbutils.widgets.text("team_name", "")
 
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-agent_name = dbutils.widgets.get("agent_name")
-audit_schema = dbutils.widgets.get("audit_schema")
+_w_schema = dbutils.widgets.get("schema")
+_w_agent_name = dbutils.widgets.get("agent_name")
+_w_audit_schema = dbutils.widgets.get("audit_schema")
 environment = dbutils.widgets.get("environment")
-vs_endpoint = dbutils.widgets.get("vs_endpoint")
-vs_index_name = dbutils.widgets.get("vs_index")
+_w_vs_endpoint = dbutils.widgets.get("vs_endpoint")
+_w_vs_index = dbutils.widgets.get("vs_index")
+_w_chatbot_name = dbutils.widgets.get("chatbot_name")
+team_name = dbutils.widgets.get("team_name").strip()
+
+# Resolve team settings — team config wins when team_name is set.
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
+agent_name = _settings.get("agent_name") or _w_agent_name
+audit_schema = _settings.get("audit_schema") or _w_audit_schema
+vs_endpoint = _settings.get("vs_endpoint") or _w_vs_endpoint
+vs_index_name = _settings.get("vs_index") or _w_vs_index
+chatbot_name = _settings.get("chatbot_name") or _w_chatbot_name
 vs_index_full = f"{catalog}.{schema}.{vs_index_name}"
-chatbot_name = dbutils.widgets.get("chatbot_name")
+print(f"team_name={team_name!r}  resolved → agent_name={agent_name!r} schema={schema!r} chatbot_name={chatbot_name!r} vs_index={vs_index_name!r}")
 
 # COMMAND ----------
 

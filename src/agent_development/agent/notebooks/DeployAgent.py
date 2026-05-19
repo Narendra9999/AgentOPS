@@ -26,10 +26,11 @@ dbutils.widgets.text("inference_tables_enabled", "true")
 dbutils.widgets.text("rate_limit_per_user_per_minute", "10")
 dbutils.widgets.text("rate_limit_per_endpoint_per_minute", "100")
 dbutils.widgets.text("usage_tracking_enabled", "true")
+dbutils.widgets.text("team_name", "")
 
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-agent_name = dbutils.widgets.get("agent_name")
+_w_schema = dbutils.widgets.get("schema")
+_w_agent_name = dbutils.widgets.get("agent_name")
 champion_version_param = dbutils.widgets.get("champion_model_version")
 champion_workload = dbutils.widgets.get("champion_workload_size")
 champion_traffic = int(dbutils.widgets.get("champion_traffic_percentage"))
@@ -38,13 +39,18 @@ challenger_version = dbutils.widgets.get("challenger_model_version")
 challenger_workload = dbutils.widgets.get("challenger_workload_size")
 challenger_traffic = int(dbutils.widgets.get("challenger_traffic_percentage"))
 scale_to_zero = dbutils.widgets.get("serving_scale_to_zero").lower() == "true"
-chatbot_name = dbutils.widgets.get("chatbot_name")
+_w_chatbot_name = dbutils.widgets.get("chatbot_name")
 ai_gateway_safety = dbutils.widgets.get("ai_gateway_safety_enabled").lower() == "true"
 inference_tables = dbutils.widgets.get("inference_tables_enabled").lower() == "true"
 rate_limit_user = int(dbutils.widgets.get("rate_limit_per_user_per_minute"))
 rate_limit_endpoint = int(dbutils.widgets.get("rate_limit_per_endpoint_per_minute"))
 usage_tracking = dbutils.widgets.get("usage_tracking_enabled").lower() == "true"
+team_name = dbutils.widgets.get("team_name").strip()
 
+# Pre-restart placeholders; resolve via team_config helper after restart
+schema = _w_schema
+agent_name = _w_agent_name
+chatbot_name = _w_chatbot_name
 model_name = f"{catalog}.{schema}.{agent_name}"
 
 # COMMAND ----------
@@ -67,9 +73,10 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 # Re-read after restart
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
-agent_name = dbutils.widgets.get("agent_name")
+_w_schema = dbutils.widgets.get("schema")
+_w_agent_name = dbutils.widgets.get("agent_name")
 champion_version_param = dbutils.widgets.get("champion_model_version")
 champion_workload = dbutils.widgets.get("champion_workload_size")
 champion_traffic = int(dbutils.widgets.get("champion_traffic_percentage"))
@@ -78,12 +85,25 @@ challenger_version = dbutils.widgets.get("challenger_model_version")
 challenger_workload = dbutils.widgets.get("challenger_workload_size")
 challenger_traffic = int(dbutils.widgets.get("challenger_traffic_percentage"))
 scale_to_zero = dbutils.widgets.get("serving_scale_to_zero").lower() == "true"
-chatbot_name = dbutils.widgets.get("chatbot_name")
+_w_chatbot_name = dbutils.widgets.get("chatbot_name")
 ai_gateway_safety = dbutils.widgets.get("ai_gateway_safety_enabled").lower() == "true"
 inference_tables = dbutils.widgets.get("inference_tables_enabled").lower() == "true"
 rate_limit_user = int(dbutils.widgets.get("rate_limit_per_user_per_minute"))
 rate_limit_endpoint = int(dbutils.widgets.get("rate_limit_per_endpoint_per_minute"))
 usage_tracking = dbutils.widgets.get("usage_tracking_enabled").lower() == "true"
+team_name = dbutils.widgets.get("team_name").strip()
+
+# Resolve team settings — team config wins when team_name is set.
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
+agent_name = _settings.get("agent_name") or _w_agent_name
+chatbot_name = _settings.get("chatbot_name") or _w_chatbot_name
+print(f"team_name={team_name!r}  resolved → agent_name={agent_name!r} schema={schema!r} chatbot_name={chatbot_name!r}")
 model_name = f"{catalog}.{schema}.{agent_name}"
 
 # Start audit tracking

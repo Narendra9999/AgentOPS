@@ -11,13 +11,29 @@ dbutils.widgets.text("preprocessed_data_table", "databricks_docs_chunked")
 dbutils.widgets.text("vs_endpoint", "agentops-vs-endpoint")
 dbutils.widgets.text("vs_index", "databricks_docs_index")
 dbutils.widgets.text("embedding_model", "databricks-gte-large-en")
+dbutils.widgets.text("team_name", "")
 
+import os
 catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
+_w_schema = dbutils.widgets.get("schema")
 preprocessed_data_table = dbutils.widgets.get("preprocessed_data_table")
-vs_endpoint = dbutils.widgets.get("vs_endpoint")
-vs_index_name = dbutils.widgets.get("vs_index")
-embedding_model = dbutils.widgets.get("embedding_model")
+_w_vs_endpoint = dbutils.widgets.get("vs_endpoint")
+_w_vs_index = dbutils.widgets.get("vs_index")
+_w_embedding_model = dbutils.widgets.get("embedding_model")
+team_name = dbutils.widgets.get("team_name").strip()
+
+# Resolve team settings — team config wins when team_name is set.
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_nb_dir = os.path.dirname(_nb_path)
+_src_root = os.path.dirname(os.path.dirname(os.path.dirname(_nb_dir)))  # .../files/src
+_bundle_root = "/Workspace" + os.path.dirname(_src_root)  # .../files
+from framework.team_config import load_team_settings
+_settings = load_team_settings(team_name, bundle_root=_bundle_root) if team_name else {}
+schema = _settings.get("schema") or _w_schema
+vs_endpoint = _settings.get("vs_endpoint") or _w_vs_endpoint
+vs_index_name = _settings.get("vs_index") or _w_vs_index
+embedding_model = _settings.get("embedding_model") or _w_embedding_model
+print(f"team_name={team_name!r}  resolved → schema={schema!r} vs_endpoint={vs_endpoint!r} vs_index={vs_index_name!r} embedding_model={embedding_model!r}")
 
 # COMMAND ----------
 
